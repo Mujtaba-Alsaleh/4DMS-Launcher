@@ -1,0 +1,7 @@
+__pycache__/*
+.venv/*
+backup/*
+build/*
+commands.txt
+dist/*
+temp/*
