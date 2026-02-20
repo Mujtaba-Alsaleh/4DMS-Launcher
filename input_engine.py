@@ -13,6 +13,9 @@ class UmuInputEngine:
         self.cooldown = 0.2
         self.joysticks = []
         
+        self.app.bind("<Any-KeyPress>", lambda e: self.app.toggle_controller_UI(hide=True))
+        self.app.bind("<Button-1>", lambda e: self.app.toggle_controller_UI(hide=True))
+
         try:
             os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
             pygame.init()
@@ -156,7 +159,6 @@ class UmuInputEngine:
         
         self.refresh_hardware()
         pygame.event.pump()
-
         for joy in self.joysticks:
             try:
                 if joy.get_button(0): self.trigger_input(self.press_current); return
@@ -172,7 +174,10 @@ class UmuInputEngine:
                 elif joy.get_button(6) and joy.get_button(7): 
                     self.app.quit()
                     return
-                elif joy.get_button(7): self.trigger_input(lambda: self.app.launch_game() if self.app.current_game_id else None); return
+                elif joy.get_button(7): 
+                    self.trigger_input(lambda: self.app.launch_game() if self.app.current_game_id else None)
+                    
+                    return
                 
                 move = 0
                 if joy.get_numhats() > 0:
@@ -187,9 +192,11 @@ class UmuInputEngine:
                     self.last_input = time.time()
                     self.nav_index = (self.nav_index + move) % len(self.nav_list)
                     self.sync_visuals()
+                    self.app.toggle_controller_UI(hide=False)
             except pygame.error:
                 self.joysticks.remove(joy)
 
     def trigger_input(self, func):
         self.last_input = time.time()
+        self.app.toggle_controller_UI(hide=False)
         func()

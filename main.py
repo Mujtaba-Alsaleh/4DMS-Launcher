@@ -41,6 +41,8 @@ class UmuLauncher(ctk.CTk):
         self.geometry("1600x1000")
         ctk.set_appearance_mode("dark")
         self.current_theme=""
+        self.ui_hidden=False
+        self.widgets_data = {}
         
         # Theme Setup - Using colors.py constants
         self.configure(fg_color=c.BG_MAIN)
@@ -88,6 +90,8 @@ class UmuLauncher(ctk.CTk):
                                       hover_color=c.ACCENT_HOVER, # Subtle dark red hover
                                       command=self.quit)
         self.exit_btn.pack(side="bottom", pady=20, padx=20)
+
+        self.add_widget_to_cache(self.exit_btn,"button_menu_view")
 
         # Content Panel
         self.panel = ctk.CTkFrame(self, corner_radius=20, fg_color=c.BG_MAIN)
@@ -150,15 +154,16 @@ class UmuLauncher(ctk.CTk):
         for g_id, data in self.games.items():
             # SKIP the settings key! Only process game IDs
             if g_id == "settings": continue 
-            
+            img=self.get_art_image(data.get('art'),size=(64,64))
             btn = ctk.CTkButton(
                     self.game_list_frame, 
                     text=f"  {data['name']}", 
                     anchor="w", 
-                    height=45, 
+                    height=64, 
                     fg_color="transparent",
-                    text_color=c.TXT_MAIN, # <--- Use the constant!
-                    hover_color=c.BG_INPUT, # <--- Use the constant!
+                    image=img,
+                    text_color=c.TXT_MAIN,
+                    hover_color=c.BG_INPUT,
                     command=lambda i=g_id: self.show_dashboard(i)
             )
             btn.pack(fill="x", pady=2)
@@ -196,9 +201,10 @@ class UmuLauncher(ctk.CTk):
         
         btn_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         btn_frame.pack(pady=20)
-
+        
         icon_menu = self.get_resources_icon("button_menu")
         icon_x = self.get_resources_icon("button_x")
+        icon_y = self.get_resources_icon("button_y")
 
         play_btn_state = "normal" if self.has_umu else "disabled"
         play_btn_text = " PLAY" if self.has_umu else " UMU MISSING"
@@ -217,10 +223,16 @@ class UmuLauncher(ctk.CTk):
                                 command=self.show_editor)
         edit_btn.pack(side="left", padx=15)
 
-        self.art_btn = ctk.CTkButton(self.content_container, text="SET ARTWORK",image=self.get_resources_icon("button_y"),
+        self.art_btn = ctk.CTkButton(self.content_container, text="SET ARTWORK",image=icon_y,
                                      fg_color=c.BG_INPUT, text_color=c.TXT_DIM,
                                      command=self.select_artwork)
         self.art_btn.pack(pady=10)
+
+        self.add_widget_to_cache(play_btn,"button_menu")
+        self.add_widget_to_cache(edit_btn,"button_x")
+        self.add_widget_to_cache(self.art_btn,"button_y")
+        #Force refresh UI state we changed the view
+        self.toggle_controller_UI(self.ui_hidden)
 
         info_str = f"Proton: {data.get('proton')}\nGamescope: {'Enabled' if data.get('gs_on') and self.has_gamescope else 'Disabled'}\nPrefix: {data.get('prefix')}\nExecutable: {data.get('exe')}"
         ctk.CTkLabel(self.content_container, text=info_str, text_color=c.TXT_DIM).pack(pady=20)
@@ -293,6 +305,7 @@ class UmuLauncher(ctk.CTk):
                                image=icon, compound="left",
                                font=("Arial", 12, "bold"), text_color=c.ACCENT)
             lbl.pack(side="left")
+            self.add_widget_to_cache(lbl,btn_name)
 
         add_hint("button_y", "SAVE CHANGES")
         add_hint("button_b", "DISCARD")
@@ -552,7 +565,7 @@ class UmuLauncher(ctk.CTk):
         try:
             if path and os.path.exists(path):
                 img = Image.open(path)
-                # Use Resampling.LANCZOS for high quality on your Legion Go screen
+                # Use Resampling.LANCZOS for high quality on Legion Go screen
                 return ctk.CTkImage(light_image=img, dark_image=img, size=size)
         except Exception as e:
             print(f"Image load error: {e}")
@@ -571,6 +584,42 @@ class UmuLauncher(ctk.CTk):
         """Check if required system tools are installed."""
         self.has_umu = shutil.which("umu-run") is not None
         self.has_gamescope = shutil.which("gamescope") is not None
+
+    def toggle_controller_UI(self,hide:bool):
+        """Only changes the global state and triggers the update."""
+        if self.ui_hidden == hide:
+            return
+        
+        self.ui_hidden = hide
+        self.update_ui()
+    
+    def update_ui(self):
+        """Decoupled: iterrates the cache and applies the logic."""
+        for name in list(self.widgets_data.keys()):
+            data = self.widgets_data[name]
+            widget = data["ref"]
+            path = data["path"]
+
+            # 1. Check if widget still exists
+            if not widget.winfo_exists():
+                del self.widgets_data[name]
+                continue
+
+            # 2. Apply Visibility Logic
+            if self.ui_hidden:
+                widget.configure(image=None)
+            else:
+                # Re-create the image from path instead of reusing old object
+                new_img = self.get_resources_icon(path)
+                widget.configure(image=new_img)
+
+    def add_widget_to_cache(self, widget, image_path):
+        """Register a widget and its source path."""
+        self.widgets_data[str(widget)] = {
+            "ref": widget,
+            "path": image_path
+        }
+
 
 if __name__ == "__main__":
     app = UmuLauncher()
