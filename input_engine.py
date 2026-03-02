@@ -13,8 +13,11 @@ class UmuInputEngine:
         self.cooldown = 0.2
         self.joysticks = []
         
-        self.app.bind("<Any-KeyPress>", lambda e: self.app.toggle_controller_UI(hide=True))
-        self.app.bind("<Button-1>", lambda e: self.app.toggle_controller_UI(hide=True))
+        self.app.bind("<Any-KeyPress>", lambda e: self.app.toggle_controller_UI(show=False))
+        self.app.bind("<Button-1>", lambda e: self.app.toggle_controller_UI(show=False))
+
+        self.quit_hold_start=0
+        self.quit_duration=2
 
         try:
             os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
@@ -144,59 +147,122 @@ class UmuInputEngine:
                  
         except Exception as e:
             print(f"Visual sync error: {e}")
+        
+        #BOBING Animation
+        # Get the currently focused widget from nav_list
+        current_widget = self.nav_list[self.nav_index]
+        
+        # Find which icon is anchored to this widget
+        for key, anchor_widget in self.app.icon_anchors.items():
+            if anchor_widget == current_widget:
+                self.bounce_icon(self.app.icon_labels[key])
+
+    def bounce_icon(self, icon_label):
+        """Quickly pops the icon up and drops it back."""
+        orig_y = icon_label.winfo_y()
+        
+        # Lift it 10 pixels up immediately
+        icon_label.place(y=orig_y - 10)
+        
+        # Drop it back after 100ms
+        self.app.after(100, lambda: icon_label.place(y=orig_y))
 
     def update(self):
-
+        # 1. Global Focus & Safety Guard
         try:
-            # If a messagebox is open, focus_displayof might fail or return a non-widget
-            if not self.app.focus_displayof():
+            if not self.app.focus_displayof(): 
                 return 
-        except Exception:
-            # If we are in a weird focus state (like a popup), just wait
+        except Exception: 
             return
-        
-        if time.time() - self.last_input < self.cooldown: return
         
         self.refresh_hardware()
         pygame.event.pump()
+        
+        now = time.time()
+        # Tracking state for this specific frame across ALL controllers
+        any_view_button_held = False
+        cooldown_active = (now - self.last_input < self.cooldown)
+
+        # --- PHASE 1: SENSOR SWEEP (Check all joysticks) ---
         for joy in self.joysticks:
             try:
-                if joy.get_button(0): self.trigger_input(self.press_current); return
-                elif joy.get_button(1): self.trigger_input(self.app.handle_back); return
-                elif joy.get_button(2): self.trigger_input(lambda: self.app.show_editor() if self.app.current_game_id else None); return
-                # 'Y' Button Logic
-                elif joy.get_button(3):
-                    if self.app.view_state == "settings":
-                        self.trigger_input(self.app.save_game)
-                    elif self.app.view_state == "dashboard":
-                        self.trigger_input(self.app.select_artwork)
-                    return
-                elif joy.get_button(6) and joy.get_button(7): 
-                    self.app.quit()
-                    return
-                elif joy.get_button(7): 
-                    self.trigger_input(lambda: self.app.launch_game() if self.app.current_game_id else None)
-                    
-                    return
-                
-                move = 0
-                if joy.get_numhats() > 0:
-                    hat = joy.get_hat(0)
-                    if hat[1] == -1: move = 1
-                    elif hat[1] == 1: move = -1
-                
-                if move == 0 and abs(joy.get_axis(1)) > 0.6:
-                    move = 1 if joy.get_axis(1) > 0 else -1
+                # Check the "View" button (6) specifically for the Quit Timer
+                if joy.get_button(6):
+                    any_view_button_held = True
 
-                if move != 0:
-                    self.last_input = time.time()
-                    self.nav_index = (self.nav_index + move) % len(self.nav_list)
-                    self.sync_visuals()
-                    self.app.toggle_controller_UI(hide=False)
+                # --- PHASE 2: TAP ACTIONS (Only if no cooldown) ---
+                if not cooldown_active:
+                    # Button A (0) - Select/Press
+                    if joy.get_button(0): 
+                        self.trigger_input(self.press_current)
+                        return # Exit loop after action to prevent double-inputs
+                    
+                    # Button B (1) - Back
+                    elif joy.get_button(1): 
+                        self.trigger_input(self.app.handle_back)
+                        return
+                    
+                    # Button X (2) - Editor
+                    elif joy.get_button(2): 
+                        self.trigger_input(lambda: self.app.show_editor() if self.app.current_game_id else None)
+                        return
+                    
+                    # Button Y (3) - Context Sensitive
+                    elif joy.get_button(3):
+                        if self.app.view_state == "settings":
+                            self.trigger_input(self.app.save_game)
+                        elif self.app.view_state == "dashboard":
+                            self.trigger_input(self.app.select_artwork)
+                        return
+
+                    # Button Start (7) - Launch
+                    elif joy.get_button(7): 
+                        self.trigger_input(lambda: self.app.launch_game() if self.app.current_game_id else None)
+                        return
+
+                    # --- PHASE 3: NAVIGATION (D-Pad & Left Stick) ---
+                    move = 0
+                    if joy.get_numhats() > 0:
+                        hat = joy.get_hat(0)
+                        if hat[1] == -1: move = 1
+                        elif hat[1] == 1: move = -1
+                    
+                    if move == 0 and abs(joy.get_axis(1)) > 0.6:
+                        move = 1 if joy.get_axis(1) > 0 else -1
+
+                    if move != 0:
+                        self.last_input = now 
+                        self.nav_index = (self.nav_index + move) % len(self.nav_list)
+                        self.sync_visuals()
+                        self.app.toggle_controller_UI(show=True)
+                        return # Exit loop to process the move
+
             except pygame.error:
                 self.joysticks.remove(joy)
 
+        # --- PHASE 4: THE GLOBAL QUIT TIMER (Processed AFTER all joysticks) ---
+        if any_view_button_held:
+            if self.quit_hold_start == 0:
+                # Start the timer
+                self.quit_hold_start = now
+                self.app.show_quit_progress(0)
+            else:
+                # Continue the timer
+                elapsed = now - self.quit_hold_start
+                percent = min(elapsed / self.quit_duration, 1.0)
+                
+                # This only updates the bar, it doesn't re-place the whole UI (Flicker Fix)
+                self.app.show_quit_progress(percent)
+
+                if elapsed >= self.quit_duration:
+                    self.app.quit()
+        else:
+            # Reset only if the button was previously held and is now released
+            if self.quit_hold_start != 0:
+                self.quit_hold_start = 0
+                self.app.hide_quit_progress()
+
     def trigger_input(self, func):
         self.last_input = time.time()
-        self.app.toggle_controller_UI(hide=False)
+        self.app.toggle_controller_UI(show=True)
         func()

@@ -10,6 +10,7 @@ import time
 from PIL import Image
 import shutil
 import sys
+import math
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -41,8 +42,8 @@ class UmuLauncher(ctk.CTk):
         self.geometry("1600x1000")
         ctk.set_appearance_mode("dark")
         self.current_theme=""
-        self.ui_hidden=False
-        self.widgets_data = {}
+        self.controller_ui_visible=False
+        self.icon_anchors = {}
         
         # Theme Setup - Using colors.py constants
         self.configure(fg_color=c.BG_MAIN)
@@ -84,14 +85,53 @@ class UmuLauncher(ctk.CTk):
                                         command=self.show_global_settings)
         self.settings_btn.pack(pady=20, padx=20)
 
-        self.exit_btn = ctk.CTkButton(self.sidebar, text="✖ EXIT",image=(self.get_resources_icon("button_menu_view",(80,80))), 
+        self.exit_btn = ctk.CTkButton(self.sidebar, text="          ✖ EXIT",compound="left",anchor='w',
                                       fg_color="transparent",
                                       text_color=c.DANGER,
+                                      width=220,height=70,
                                       hover_color=c.ACCENT_HOVER, # Subtle dark red hover
                                       command=self.quit)
         self.exit_btn.pack(side="bottom", pady=20, padx=20)
 
-        self.add_widget_to_cache(self.exit_btn,"button_menu_view")
+        # Create the icons as children of 'self' (the main window)
+        self.controllerUI_icon_size=(32,32)
+        self.icon_labels = {
+            "A": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_a", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+            "B": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_b", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+            "X": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_x", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+            "Y": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_y", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+            "menu": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_menu", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+            "view": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_view", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
+        }
+
+        # Hide them immediately
+        for icon in self.icon_labels.values():
+            icon.place_forget()
+        
+
+        self.icon_anchors = {} # { "A": widget_object }
+        self.controller_ui_visible = False
+        self.anchor_icon("view",self.exit_btn)
+
+        # Icons Animation
+        self.anim_offset = 0
+        self.anim_direction = 1
+        self.is_animating = False
+
+        # Quitting using controller hold countdown
+        self.quit_overlay = ctk.CTkFrame(self, fg_color="#1a1a1a", corner_radius=20, border_width=2, border_color=c.BG_FOCUS)
+        self.quit_label = ctk.CTkLabel(self.quit_overlay, text="QUITTING...", font=("Arial", 24, "bold"))
+        self.quit_label.pack(pady=(20, 5), padx=40)
+        # The Progress Bar
+        self.quit_progress = ctk.CTkProgressBar(self.quit_overlay, width=200, height=15, progress_color=c.BG_FOCUS)
+        self.quit_progress.set(0)
+        self.quit_progress.pack(pady=(0, 20), padx=40)
+        # Keep it hidden
+        self.quit_overlay.place_forget()
+        # This frame acts as our "Blur/Dim" layer
+        self.blur_overlay = ctk.CTkFrame(self, fg_color="#0a0a0a", corner_radius=0)
+
+
 
         # Content Panel
         self.panel = ctk.CTkFrame(self, corner_radius=20, fg_color=c.BG_MAIN)
@@ -173,12 +213,14 @@ class UmuLauncher(ctk.CTk):
         self.view_state = "welcome"
         self.current_game_id = None
         for w in self.content_container.winfo_children(): w.destroy()
+        self.clear_controller_ui()
         ctk.CTkLabel(self.content_container, 
                      text="Welcome to 4DMS Launcher\nSelect a game or press + to add one", 
                      font=("Arial", 18), 
                      text_color=c.TXT_DIM).place(relx=0.5, rely=0.5, anchor="center")
 
     def show_dashboard(self, g_id):
+        self.clear_controller_ui()
         self.check_dependencies() # refresh the check
         self.view_state = "dashboard"
         self.current_game_id = g_id
@@ -202,49 +244,53 @@ class UmuLauncher(ctk.CTk):
         btn_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         btn_frame.pack(pady=20)
         
-        icon_menu = self.get_resources_icon("button_menu")
-        icon_x = self.get_resources_icon("button_x")
-        icon_y = self.get_resources_icon("button_y")
 
         play_btn_state = "normal" if self.has_umu else "disabled"
-        play_btn_text = " PLAY" if self.has_umu else " UMU MISSING"
+        play_btn_text = "       PLAY   " if self.has_umu else " UMU MISSING"
         play_btn_color = c.SUCCESS if self.has_umu else "#444444"
 
-        play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, image=icon_menu, 
-                                compound="left", width=220, height=70,
+        self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
+                                compound="left", width=220, height=70,anchor='w',
                                 state=play_btn_state, 
                                 fg_color=play_btn_color, font=("Arial", 22, "bold"),
                                 command=self.launch_game)
-        play_btn.pack(side="left", padx=15)
+        self.play_btn.pack(side="left", padx=15)
 
-        edit_btn = ctk.CTkButton(btn_frame, text=" SETTINGS", image=icon_x,
+        edit_btn = ctk.CTkButton(btn_frame, text="       SETTINGS   ",anchor='w',
                                 compound="left", width=140, height=70, 
                                 fg_color=c.BG_INPUT,
                                 command=self.show_editor)
         edit_btn.pack(side="left", padx=15)
 
-        self.art_btn = ctk.CTkButton(self.content_container, text="SET ARTWORK",image=icon_y,
-                                     fg_color=c.BG_INPUT, text_color=c.TXT_DIM,
+        self.art_btn = ctk.CTkButton(self.content_container, text="       SET ARTWORK   ",anchor='w',
+                                     compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,
                                      command=self.select_artwork)
         self.art_btn.pack(pady=10)
 
-        self.add_widget_to_cache(play_btn,"button_menu")
-        self.add_widget_to_cache(edit_btn,"button_x")
-        self.add_widget_to_cache(self.art_btn,"button_y")
-        #Force refresh UI state we changed the view
-        self.toggle_controller_UI(self.ui_hidden)
+        if ctk_img: # that mean image exist
+            rm_art_btn = ctk.CTkButton(self.content_container, text="REMOVE ARTWORK",anchor='w',
+                                     compound="left", width=20, height=20,fg_color=c.DANGER,hover_color=c.DANGER_HOVER, text_color=c.TXT_DIM,
+                                     command=self.remove_artwork)
+            rm_art_btn.pack(padx=10)
+
+        self.anchor_icon("menu",self.play_btn)
+        self.anchor_icon("X",edit_btn)
+        self.anchor_icon("Y",self.art_btn)
 
         info_str = f"Proton: {data.get('proton')}\nGamescope: {'Enabled' if data.get('gs_on') and self.has_gamescope else 'Disabled'}\nPrefix: {data.get('prefix')}\nExecutable: {data.get('exe')}"
         ctk.CTkLabel(self.content_container, text=info_str, text_color=c.TXT_DIM).pack(pady=20)
         
-
-        self.engine.rebuild_nav_map(priority_widget=play_btn)
+        self.engine.rebuild_nav_map(priority_widget=self.play_btn)
+        self.update_idletasks()     # FORCE the window to calculate widget positions NOW
+        self.after(50,self.update_controller_icons()) # delay it a bit for smoother pop in
 
     def show_editor(self):
         self.check_dependencies() # Refresh check
         self.view_state = "settings"
         data = self.games[self.current_game_id]
         for w in self.content_container.winfo_children(): w.destroy()
+
+        self.clear_controller_ui()
 
         scroll = ctk.CTkScrollableFrame(self.content_container, fg_color="transparent",scrollbar_button_color=c.ACCENT,scrollbar_button_hover_color=c.ACCENT_HOVER)
         scroll.pack(fill="both", expand=True, padx=20, pady=20)
@@ -299,19 +345,21 @@ class UmuLauncher(ctk.CTk):
         footer_frame.pack(side="bottom", pady=10)
 
         # Create a small helper for footer items
-        def add_hint(btn_name, hint_text):
-            icon = self.get_resources_icon(btn_name)
-            lbl = ctk.CTkLabel(footer_frame, text=f" {hint_text}   ", 
-                               image=icon, compound="left",
+        def add_hint(hint_text,btn_hint):
+            lbl = ctk.CTkLabel(footer_frame, text=f"        {hint_text}        ",
+                               anchor='w',
+                               compound="left",
                                font=("Arial", 12, "bold"), text_color=c.ACCENT)
             lbl.pack(side="left")
-            self.add_widget_to_cache(lbl,btn_name)
+            self.anchor_icon(btn_hint,lbl)
 
-        add_hint("button_y", "SAVE CHANGES")
-        add_hint("button_b", "DISCARD")
-        add_hint("button_x", "RESET")
+        add_hint("SAVE CHANGES","Y")
+        add_hint("DISCARD","B")
+        add_hint("RESET","X")
         
         self.engine.rebuild_nav_map(priority_widget=self.e_name)
+        self.update_idletasks()     # FORCE the window to calculate widget positions NOW
+        self.after(50,self.update_controller_icons()) # delay it a bit for smoother pop in
 
     def create_input(self, master, label, value, is_file=None):
         ctk.CTkLabel(master, text=label, font=("Arial", 12, "bold"), text_color=c.TXT_DIM).pack(pady=(10,0))
@@ -380,6 +428,7 @@ class UmuLauncher(ctk.CTk):
     def show_global_settings(self):
         self.view_state = "global_settings"
         for w in self.content_container.winfo_children(): w.destroy()
+        self.clear_controller_ui()
         
         ctk.CTkLabel(self.content_container, text="Global Settings", font=("Arial", 32, "bold")).pack(pady=40)
         
@@ -537,6 +586,25 @@ class UmuLauncher(ctk.CTk):
             self.games[self.current_game_id]["art"] = str(dest_path)
             self.save_data()
             self.show_dashboard(self.current_game_id)
+            self.refresh_sidebar()
+    
+    def remove_artwork(self):
+        """deletes art, and updates JSON."""
+        if not self.current_game_id: return
+
+        # --- NEW CLEANUP LOGIC ---
+        # Check if there's already an existing art path in our data
+        art_path = self.games[self.current_game_id].get("art")
+        if art_path and os.path.exists(art_path):
+            try:
+                os.remove(art_path)
+            except Exception as e:
+                print(f"Cleanup failed: {e}")
+        # -------------------------
+        self.games[self.current_game_id]["art"] = ""
+        self.save_data()
+        self.show_dashboard(self.current_game_id)
+        self.refresh_sidebar()
     
     def clear_all_artwork(self):
         """Deletes every image in the Artwork folder and resets JSON entries."""
@@ -560,7 +628,7 @@ class UmuLauncher(ctk.CTk):
         self.show_welcome()
         print("Storage Cleared: All artwork deleted.")
 
-    def get_art_image(self, path, size=(225, 400)):
+    def get_art_image(self, path, size=(180, 240)):
         """Loads and scales the image for the UI."""
         try:
             if path and os.path.exists(path):
@@ -576,7 +644,7 @@ class UmuLauncher(ctk.CTk):
         icon_path = resource_path(f"resources/{name}.png")
         
         if os.path.exists(icon_path):
-            img = Image.open(icon_path)
+            img = Image.open(icon_path).convert("RGBA")
             return ctk.CTkImage(light_image=img, dark_image=img, size=size)
         return None
 
@@ -585,40 +653,141 @@ class UmuLauncher(ctk.CTk):
         self.has_umu = shutil.which("umu-run") is not None
         self.has_gamescope = shutil.which("gamescope") is not None
 
-    def toggle_controller_UI(self,hide:bool):
-        """Only changes the global state and triggers the update."""
-        if self.ui_hidden == hide:
+    def toggle_controller_UI(self,show=True):
+        """Shows or hides the floating controller icons based on input mode."""
+        self.controller_ui_visible = show
+        if show:
+            # 1. Update positions to match current anchored widgets
+            self.update_controller_icons()
+            # 2. Animate
+            if not self.is_animating:
+                self.animate_icons()
+        else:
+            # 3. Hide all floating labels from the screen
+            for icon in self.icon_labels.values():
+                icon.place_forget()
+
+    def anchor_icon(self, key, widget):
+        self.icon_anchors[key] = widget
+    
+    def clear_controller_ui(self):
+        """Wipes non-persistent anchors and hides their labels."""
+        # We create a list of keys to remove so we don't crash while iterating
+        keys_to_remove = [k for k in self.icon_anchors.keys() if k != "view"]
+        
+        for key in keys_to_remove:
+            # 1. Hide the physical label
+            if key in self.icon_labels:
+                self.icon_labels[key].place_forget()
+            # 2. Remove from the map
+            del self.icon_anchors[key]
+
+        # Refresh the ones that stayed (like menu_view)
+        self.update_controller_icons()
+
+    def update_controller_icons(self):
+        if not self.controller_ui_visible:
+            for icon in self.icon_labels.values():
+                icon.place_forget()
             return
         
-        self.ui_hidden = hide
-        self.update_ui()
-    
-    def update_ui(self):
-        """Decoupled: iterrates the cache and applies the logic."""
-        for name in list(self.widgets_data.keys()):
-            data = self.widgets_data[name]
-            widget = data["ref"]
-            path = data["path"]
+        # Hide labels that aren't currently anchored
+        for key, label in self.icon_labels.items():
+            if key not in self.icon_anchors:
+                label.place_forget()
+        
+        for key, widget in self.icon_anchors.items():
+            try:
+                if widget.winfo_exists() and widget.winfo_viewable():
+                    # 1. Get Widget Dimensions
+                    wx = widget.winfo_rootx() - self.winfo_rootx()
+                    wy = widget.winfo_rooty() - self.winfo_rooty()
+                    ww = widget.winfo_width()
+                    wh = widget.winfo_height()
 
-            # 1. Check if widget still exists
-            if not widget.winfo_exists():
-                del self.widgets_data[name]
-                continue
+                    icon = self.icon_labels[key]
+                    
+                    # 2. Set Icon Specs (Match your 32x32 size)
+                    iw, ih = 32, 32 
 
-            # 2. Apply Visibility Logic
-            if self.ui_hidden:
-                widget.configure(image=None)
-            else:
-                # Re-create the image from path instead of reusing old object
-                new_img = self.get_resources_icon(path)
-                widget.configure(image=new_img)
+                    # 3. POSITION REFINEMENT
+                    # Adjust these numbers to "nudge" the icons
+                    # Current: Inside the left edge (x+5), Vertically Centered
+                    target_x = wx + 8  
+                    target_y = wy + (wh // 2) - (ih // 2)
 
-    def add_widget_to_cache(self, widget, image_path):
-        """Register a widget and its source path."""
-        self.widgets_data[str(widget)] = {
-            "ref": widget,
-            "path": image_path
-        }
+                    # 4. Handle Special Cases (like the Exit Button)
+                    if key == "view":
+                        # Maybe put the exit icon on the on the far right?
+                        target_x = wx + ww - iw - 24
+                    
+                    # 5. Background Match (Crucial for the "Black Box")
+                    # If the icon is INSIDE the button, use button color.
+                    # If the icon is OUTSIDE the button, use the parent color.
+                    icon.configure(fg_color=widget.cget("fg_color"))
+
+                    icon.place(x=target_x, y=target_y)
+                    icon.lift()
+            except Exception as e:
+                pass
+
+    def show_quit_progress(self, percent):
+        """Shows the dimming 'blur' and the quit modal."""
+        # 1. Show the "Blur" (Dimmer) first
+        if not self.quit_overlay.winfo_ismapped():
+                self.blur_overlay.place(relx=0, rely=0, relwidth=1, relheight=1)
+                self.blur_overlay.lift()
+                
+                # 2. Show and center the Quit Modal
+                self.quit_overlay.place(relx=0.5, rely=0.5, anchor="center")
+                self.quit_overlay.lift()
+        
+        # 3. Update the bar
+        self.quit_progress.set(percent)
+        
+        # Text feedback
+        if percent > 0.9:
+            self.quit_label.configure(text="RELEASE TO CANCEL", text_color="#ff4444")
+        else:
+            self.quit_label.configure(text="QUITTING APP...", text_color="white")
+
+    def hide_quit_progress(self):
+        """Clears both the modal and the blur."""
+        self.quit_overlay.place_forget()
+        self.blur_overlay.place_forget()
+        self.quit_progress.set(0)
+
+    def animate_icons(self):
+        """Creates a 'Heartbeat' pulse by slightly shifting the icons."""
+        if not self.controller_ui_visible:
+            self.is_animating = False
+            return
+
+        self.is_animating = True
+        
+        # Heartbeat math: using a sine wave for smooth scaling effect
+        # This oscillates between -2 and +2 pixels
+        anim_speed=1
+        t = time.time() * anim_speed  # Speed of the pulse
+        offset = math.sin(t) * 2 
+
+        for key, widget in self.icon_anchors.items():
+            try:
+                icon = self.icon_labels[key]
+                # We must recalculate from the widget base to prevent "drifting"
+                wx = widget.winfo_rootx() - self.winfo_rootx()
+                wy = widget.winfo_rooty() - self.winfo_rooty()
+                wh = widget.winfo_height()
+                
+                # Standard vertical center (16 is half of icon height 32)
+                base_y = wy + (wh // 2) - 16
+                
+                # Apply the pulse offset
+                icon.place(y=base_y + offset)
+            except:
+                pass
+
+        self.after(30, self.animate_icons)
 
 
 if __name__ == "__main__":
