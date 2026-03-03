@@ -1,0 +1,45 @@
+import customtkinter as ctk
+import colors as c
+class EditableTitle(ctk.CTkFrame):
+    def __init__(self, parent, initial_text, callback=None):
+        # Set fg_color to transparent so it blends in
+        super().__init__(parent, fg_color="transparent")
+        self.text = initial_text
+        self.callback = callback
+
+        # 1. THE LABEL
+        self.label = ctk.CTkLabel(
+            self, text=self.text, 
+            font=("Arial", 32, "bold"), # Bigger font for the "Hero" title
+            text_color=c.ACCENT 
+        )
+        # Use a wider pady to give the title its own "Zone"
+        self.label.pack(expand=True, fill="x", pady=(10, 30))
+        
+        self.label.bind("<Double-Button-1>", lambda e: self.enable_editing())
+
+        # 2. THE ENTRY
+        self.entry = ctk.CTkEntry(self, font=("Arial", 24), justify="center")
+        
+        self.entry.bind("<Return>", lambda e: self.save_edit())
+        self.entry.bind("<Escape>", lambda e: self.disable_editing())
+
+    def enable_editing(self):
+        self.label.pack_forget()
+        self.entry.pack(expand=True, pady=5) # Don't fill "x" to keep it from stretching
+        self.entry.delete(0, "end")
+        self.entry.insert(0, self.text)
+        self.entry.focus_set()
+
+    def disable_editing(self):
+        self.entry.pack_forget()
+        self.label.pack(expand=True, fill="x")
+
+    def save_edit(self):
+        new_text = self.entry.get().strip()
+        if new_text:
+            self.text = new_text
+            self.label.configure(text=self.text)
+            if self.callback:
+                self.callback(self.text)
+        self.disable_editing()

@@ -3,7 +3,7 @@ import os
 import time
 import customtkinter as ctk
 import colors as c
-
+from controller_file_browser import ControllerFileBrowser
 class UmuInputEngine:
     def __init__(self, app):
         self.app = app
@@ -12,6 +12,8 @@ class UmuInputEngine:
         self.last_input = 0
         self.cooldown = 0.2
         self.joysticks = []
+        self.current_file_browser:ControllerFileBrowser=None
+        self.in_file_browser=False
         
         self.app.bind("<Any-KeyPress>", lambda e: self.app.toggle_controller_UI(show=False))
         self.app.bind("<Button-1>", lambda e: self.app.toggle_controller_UI(show=False))
@@ -56,6 +58,20 @@ class UmuInputEngine:
                 self.nav_index = 0
         
         self.sync_visuals()
+    
+    def rebuild_nav_map_file_browser(self, target_app_window:ControllerFileBrowser ,priority_widget=None):
+        self.nav_list = []
+        self.current_file_browser=target_app_window
+        self._scan_widget_tree(target_app_window)
+        
+        if priority_widget and priority_widget in self.nav_list:
+            self.nav_index = self.nav_list.index(priority_widget)
+        else:
+            if self.nav_index >= len(self.nav_list):
+                self.nav_index = 0
+        self.in_file_browser=True
+        self.sync_visuals()
+
 
     def _scan_widget_tree(self, parent):
         for child in parent.winfo_children():
@@ -157,6 +173,9 @@ class UmuInputEngine:
             if anchor_widget == current_widget:
                 self.bounce_icon(self.app.icon_labels[key])
 
+        if self.in_file_browser and self.current_file_browser:
+            self.current_file_browser.scroll_to_selected(selected_index=self.nav_index)
+
     def bounce_icon(self, icon_label):
         """Quickly pops the icon up and drops it back."""
         orig_y = icon_label.winfo_y()
@@ -221,21 +240,66 @@ class UmuInputEngine:
                         return
 
                     # --- PHASE 3: NAVIGATION (D-Pad & Left Stick) ---
-                    move = 0
+                    move_x, move_y = 0, 0
+
+                    # 1. Capture Input
                     if joy.get_numhats() > 0:
                         hat = joy.get_hat(0)
-                        if hat[1] == -1: move = 1
-                        elif hat[1] == 1: move = -1
-                    
-                    if move == 0 and abs(joy.get_axis(1)) > 0.6:
-                        move = 1 if joy.get_axis(1) > 0 else -1
+                        move_x, move_y = hat[0], -hat[1]
+                    if move_x == 0 and abs(joy.get_axis(0)) > 0.6:
+                        move_x = 1 if joy.get_axis(0) > 0 else -1
+                    if move_y == 0 and abs(joy.get_axis(1)) > 0.6:
+                        move_y = 1 if joy.get_axis(1) > 0 else -1
 
-                    if move != 0:
-                        self.last_input = now 
-                        self.nav_index = (self.nav_index + move) % len(self.nav_list)
-                        self.sync_visuals()
-                        self.app.toggle_controller_UI(show=True)
-                        return # Exit loop to process the move
+                    if move_x != 0 or move_y != 0:
+                        self.last_input = now
+                        num_widgets = len(self.nav_list)
+                        
+                        if self.in_file_browser:
+                            # We assume first 3 widgets are [Select, Cancel, Back]
+                            # Everything from index 3 onwards is the 6-column grid
+                            header_count = 3 
+                            cols = 6
+
+                            if self.nav_index < header_count:
+                                # --- HEADER NAVIGATION LOGIC ---
+                                if move_x != 0:
+                                    new_index = (self.nav_index + move_x) % header_count
+                                elif move_y == 1: # Moving Down from header to grid
+                                    new_index = header_count # Snap to first grid item
+                                elif move_y == -1: # Moving Up (nowhere to go)
+                                    new_index = self.nav_index
+                            else:
+                                # --- GRID NAVIGATION LOGIC ---
+                                grid_idx = self.nav_index - header_count
+                                
+                                if move_x != 0:
+                                    # WRAPPING: (index + move) % total
+                                    new_grid_idx = (grid_idx + move_x) % (num_widgets - header_count)
+                                    new_index = header_count + new_grid_idx
+                                
+                                elif move_y != 0:
+                                    new_grid_idx = grid_idx + (move_y * cols)
+                                    
+                                    # If moving UP and we exit the top of the grid, go to Header
+                                    if new_grid_idx < 0:
+                                        new_index = 0 # Snap to 'Select Folder'
+                                    elif new_grid_idx < (num_widgets - header_count):
+                                        new_index = header_count + new_grid_idx
+                                    else:
+                                        new_index = self.nav_index # Stay at bottom
+                        else:
+                            # Standard Vertical List Wrapping
+                            new_index = (self.nav_index + move_y) % num_widgets
+
+                        # Apply changes
+                        if 0 <= new_index < num_widgets:
+                            self.nav_index = new_index
+                            self.sync_visuals()
+                            if self.in_file_browser and self.current_file_browser:
+                                self.current_file_browser.scroll_to_selected(self.nav_index)
+                                self.app.toggle_controller_UI(show=True)
+                            return
 
             except pygame.error:
                 self.joysticks.remove(joy)

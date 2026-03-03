@@ -5,12 +5,16 @@ import pathlib
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from input_engine import UmuInputEngine
+from editable_title import EditableTitle
 import colors as c
 import time
 from PIL import Image
 import shutil
 import sys
 import math
+import threading
+import psutil
+import signal
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -23,7 +27,7 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 # --- Configuration Paths ---
-CONFIG_DIR = pathlib.Path(os.getenv("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "umu-launcher"
+CONFIG_DIR = pathlib.Path(os.getenv("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "4DMS-Launcher"
 CONFIG_FILE = CONFIG_DIR / "games.json"
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
 ARTWORK_DIR = CONFIG_DIR / "Artwork"
@@ -36,6 +40,7 @@ class UmuLauncher(ctk.CTk):
         self.has_gamescope = None
         self.has_umu = None
         self.check_dependencies()
+        self.ensure_data_file()
 
         # Window Setup
         self.title("4DMS Launcher")
@@ -44,6 +49,12 @@ class UmuLauncher(ctk.CTk):
         self.current_theme=""
         self.controller_ui_visible=False
         self.icon_anchors = {}
+        self.is_playing = False
+        self.game_process = None
+        self.current_running_game_id=0
+        self.launch_lock=False #(Prevents Spamming) while launching the game process
+        self.launch_lock_cooldown=2000 # 2 seconds
+        self.current_file_browser = None
         
         # Theme Setup - Using colors.py constants
         self.configure(fg_color=c.BG_MAIN)
@@ -94,7 +105,7 @@ class UmuLauncher(ctk.CTk):
         self.exit_btn.pack(side="bottom", pady=20, padx=20)
 
         # Create the icons as children of 'self' (the main window)
-        self.controllerUI_icon_size=(32,32)
+        self.controllerUI_icon_size=(24,24)
         self.icon_labels = {
             "A": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_a", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
             "B": ctk.CTkLabel(self, text="", image=self.get_resources_icon("button_b", self.controllerUI_icon_size), fg_color=c.BG_MAIN),
@@ -152,6 +163,25 @@ class UmuLauncher(ctk.CTk):
         
         self.run_loop()
 
+    def ensure_data_file(self):
+        if os.path.exists(CONFIG_FILE):
+            return
+            # We start with only settings. 
+            # The game_xxxx keys will be added dynamically by'save_game' logic.
+        default_data = {
+                "settings": 
+                {
+                    "theme": "Deep Blue"
+                }
+        }
+            
+        try:
+            with open(CONFIG_FILE, 'w') as f:
+                json.dump(default_data, f, indent=4)
+            print("Successfully initialized data.json with Deep Blue theme.")
+        except Exception as e:
+                print(f"Failed to create data file: {e}")
+
     def run_loop(self):
         self.engine.update()
         self.after(20, self.run_loop)
@@ -185,6 +215,9 @@ class UmuLauncher(ctk.CTk):
     def handle_back(self):
         if self.view_state == "settings":
             self.show_dashboard(self.current_game_id)
+        elif self.view_state == "browser" and self.current_file_browser:
+            self.current_file_browser.handle_select("..")
+            return
         else:
             self.show_welcome()
         self.engine.rebuild_nav_map()
@@ -246,14 +279,21 @@ class UmuLauncher(ctk.CTk):
         
 
         play_btn_state = "normal" if self.has_umu else "disabled"
-        play_btn_text = "       PLAY   " if self.has_umu else " UMU MISSING"
-        play_btn_color = c.SUCCESS if self.has_umu else "#444444"
+        if self.has_umu and not self.is_playing:
+            play_btn_text="       PLAY   "
+            play_btn_color=c.SUCCESS
+        elif self.is_playing:
+            play_btn_text="       STOP   "
+            play_btn_color=c.DANGER
+        else:
+            play_btn_text="       UMU MISSING   "
+            play_btn_color="#444444"
 
         self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
                                 compound="left", width=220, height=70,anchor='w',
                                 state=play_btn_state, 
                                 fg_color=play_btn_color, font=("Arial", 22, "bold"),
-                                command=self.launch_game)
+                                command=self.try_launch_game)
         self.play_btn.pack(side="left", padx=15)
 
         edit_btn = ctk.CTkButton(btn_frame, text="       SETTINGS   ",anchor='w',
@@ -277,8 +317,8 @@ class UmuLauncher(ctk.CTk):
         self.anchor_icon("X",edit_btn)
         self.anchor_icon("Y",self.art_btn)
 
-        info_str = f"Proton: {data.get('proton')}\nGamescope: {'Enabled' if data.get('gs_on') and self.has_gamescope else 'Disabled'}\nPrefix: {data.get('prefix')}\nExecutable: {data.get('exe')}"
-        ctk.CTkLabel(self.content_container, text=info_str, text_color=c.TXT_DIM).pack(pady=20)
+        self.info_str = f"Proton: {data.get('proton')}\nGamescope: {'Enabled' if data.get('gs_on') and self.has_gamescope else 'Disabled'}\nPrefix: {data.get('prefix')}\nExecutable: {data.get('exe')}\nPlaytime: {self.format_playtime(data.get('playtime'))}"
+        ctk.CTkLabel(self.content_container, text=self.info_str, text_color=c.TXT_DIM).pack(pady=20)
         
         self.engine.rebuild_nav_map(priority_widget=self.play_btn)
         self.update_idletasks()     # FORCE the window to calculate widget positions NOW
@@ -297,42 +337,64 @@ class UmuLauncher(ctk.CTk):
 
         ctk.CTkLabel(scroll, text="Game Settings", font=("Arial", 24, "bold"), text_color=c.ACCENT).pack(pady=10)
         
-        self.e_name = self.create_input(scroll, "Display Name", data['name'])
-        self.e_exe = self.create_input(scroll, "Executable Path", data['exe'], True)
-        self.e_prefix = self.create_input(scroll, "WINEPREFIX Path", data['prefix'], False)
+        def on_name_changed(new_name):
+            print(f"Updating JSON with new name: {new_name}")
+            data['name'] = new_name
 
-        ctk.CTkLabel(scroll, text="Compatibility Layer", font=("Arial", 12, "bold"), text_color=c.TXT_DIM).pack(pady=(15, 0))
+        # 1. Title Area (Hero Section)
+        # Give the game name massive priority
+        self.e_name = EditableTitle(scroll, data['name'], callback=on_name_changed)
+        self.e_name.pack(pady=(20, 40), fill="x")
+
+        # 2. Settings Rows (No more clunky boxes)
+        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
+        self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
+
+        # 3. Compatibility Layer (OptionMenu)
+        comp_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        comp_frame.pack(fill="x", padx=60, pady=15)
+        ctk.CTkLabel(comp_frame, text="COMPATIBILITY", font=("Arial", 11, "bold"), text_color=c.TXT_DIM).pack()
+        
         self.e_proton = ctk.CTkOptionMenu(scroll, values=list(self.proton_paths.keys()), 
-                                         width=450, fg_color=c.BG_INPUT, button_color=c.BG_INPUT)
+                                        width=300, height=40, fg_color=c.BG_INPUT, 
+                                        button_color=c.BG_INPUT, dynamic_resizing=False)
         self.e_proton.set(data.get('proton', "Default (UMU Internal)"))
         self.e_proton.pack(pady=5)
 
-        # --- Gamescope Group ---
-        self.gs_frame = ctk.CTkFrame(scroll, fg_color=c.BG_PANEL)
-        self.gs_frame.pack(fill="x", padx=40, pady=10)
+        # 4. Gamescope (Simplified)
+        gs_container = ctk.CTkFrame(scroll, fg_color="transparent")
+        gs_container.pack(pady=20)
+
+        self.gs_on_var = ctk.BooleanVar(value=data.get('gs_on', False))
+        init_val = self.gs_on_var.get()
+        self.gs_toggle_btn = ctk.CTkButton(
+            gs_container, 
+            text="GAMESCOPE: ENABLED" if init_val else "GAMESCOPE: DISABLED",
+            font=("Arial", 14, "bold"),
+            fg_color=c.SUCCESS if init_val else "#333333",
+            height=45,
+            width=300,
+            corner_radius=20,
+            command=self.toggle_gamescope_ui,
+            state="normal" if self.has_gamescope else "disabled"
+        )
+        self.gs_toggle_btn.pack()
+
+        res_row = ctk.CTkFrame(gs_container, fg_color="transparent")
+        res_row.pack(pady=(0, 15))
         
-        cb_state = "normal" if self.has_gamescope else "disabled"
-        cb_text = " Enable Gamescope" if self.has_gamescope else " Gamescope Not Found"
-        cb_init_value = data.get('gs_on', False) if self.has_gamescope else False
-        self.gs_on_var = ctk.BooleanVar(value=cb_init_value)
-        self.gs_cb = ctk.CTkCheckBox(self.gs_frame, text=cb_text,state=cb_state, variable=self.gs_on_var, fg_color=c.BG_INPUT,text_color_disabled=c.TXT_DIM)
-        self.gs_cb.pack(pady=(15, 10)) # Added top padding for better spacing
-        
-        # New: A container just for the resolution inputs to keep them centered
-        res_container = ctk.CTkFrame(self.gs_frame, fg_color="transparent")
-        res_container.pack(pady=(0, 15)) 
-        
-        self.gs_w = ctk.CTkEntry(res_container, width=80, state=cb_state,fg_color=c.BG_INPUT, justify="center")
+        self.gs_w = ctk.CTkEntry(res_row, width=80, state="normal" if self.has_gamescope else "disabled" ,fg_color=c.BG_INPUT, justify="center")
         self.gs_w.insert(0, data.get('gs_w', "1280"))
         self.gs_w.pack(side="left", padx=5)
         
         # Add a "x" label between them for extra polish
-        ctk.CTkLabel(res_container, text="x", font=("Arial", 16)).pack(side="left", padx=5)
+        ctk.CTkLabel(res_row, text="x", font=("Arial", 16)).pack(side="left", padx=5)
         
-        self.gs_h = ctk.CTkEntry(res_container, width=80, state=cb_state,fg_color=c.BG_INPUT, justify="center")
+        self.gs_h = ctk.CTkEntry(res_row, width=80, state="normal" if self.has_gamescope else "disabled" ,fg_color=c.BG_INPUT, justify="center")
         self.gs_h.insert(0, data.get('gs_h', "720"))
         self.gs_h.pack(side="left", padx=5)
-        self.e_script = self.create_input(scroll, "Pre-launch Script (Optional)", data.get('script', ""), True)
+        #self.e_script = self.create_input(scroll, "Pre-launch Script (Optional)", data.get('script', ""), True)
+        self.e_script=None
 
         # Actions
         act_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -357,25 +419,74 @@ class UmuLauncher(ctk.CTk):
         add_hint("DISCARD","B")
         add_hint("RESET","X")
         
-        self.engine.rebuild_nav_map(priority_widget=self.e_name)
+        self.engine.rebuild_nav_map(priority_widget=self.e_exe_btn)
         self.update_idletasks()     # FORCE the window to calculate widget positions NOW
-        self.after(50,self.update_controller_icons()) # delay it a bit for smoother pop in
+        self.after(50,self.update_controller_icons) # delay it a bit for smoother pop in
 
-    def create_input(self, master, label, value, is_file=None):
-        ctk.CTkLabel(master, text=label, font=("Arial", 12, "bold"), text_color=c.TXT_DIM).pack(pady=(10,0))
-        f = ctk.CTkFrame(master, fg_color="transparent")
-        f.pack(fill="x", padx=40, pady=5)
-        e = ctk.CTkEntry(f, height=35, fg_color=c.BG_INPUT)
-        e.insert(0, value)
-        e.pack(side="left", expand=True, fill="x", padx=5)
-        if is_file is not None:
-            ctk.CTkButton(f, text="...", width=40, fg_color=c.BG_INPUT, command=lambda: self.browse(e, is_file)).pack(side="left")
-        return e
+    def toggle_gamescope_ui(self):
+        """Switches the Gamescope state and updates the UI button immediately."""
+        # 1. Flip the boolean value
+        current_val = self.gs_on_var.get()
+        self.gs_on_var.set(not current_val)
+        
+        # 2. Update the button look
+        new_val = self.gs_on_var.get()
+        status_text = "GAMESCOPE: ENABLED" if new_val else "GAMESCOPE: DISABLED"
+        status_color = c.SUCCESS if new_val else "#333333" # Dim gray when off
+        
+        self.gs_toggle_btn.configure(text=status_text, fg_color=status_color)
+        
+        # 3. Enable/Disable the resolution inputs based on the toggle
+        state = "normal" if new_val else "disabled"
+        self.gs_w.configure(state=state)
+        self.gs_h.configure(state=state)
 
+    def create_setting_row(self, parent, label_text, value, is_file=True):
+        """Creates a clean, transparent row that the controller can highlight as a whole."""
+        # 1. Outer container for spacing
+        wrapper = ctk.CTkFrame(parent, fg_color="transparent")
+        wrapper.pack(fill="x", padx=60, pady=10)
+
+        # 2. Header Label (The 'Small Caps' style)
+        ctk.CTkLabel(wrapper, text=label_text.upper(), 
+                    font=("Arial", 10, "bold"), text_color=c.TXT_DIM).pack(pady=(0, 2))
+
+        # 3. The Interactive Card
+        # We use a Frame so we can pack multiple things inside it without 'grid' conflicts
+        card = ctk.CTkFrame(wrapper, fg_color=c.BG_MAIN, height=45, corner_radius=8)
+        card.pack(fill="x")
+        card.pack_propagate(False) # Keep fixed height
+
+        # 4. Content inside the card
+        path_label = ctk.CTkLabel(card, text=value, font=("Arial", 13), 
+                                fg_color="transparent", anchor="n")
+        path_label.pack(side="left", padx=15, fill="x", expand=True)
+
+        icon = "📄" if is_file else "📁"
+        ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file), 
+                    fg_color="transparent",anchor="n").pack(side="right", padx=15)
+
+        # 5. Controller/Mouse Binding
+        # We bind the click to the frame AND the labels inside it
+        def on_click(event=None):
+            self.browse(path_label, is_file)
+
+        card.bind("<Button-1>", on_click)
+        path_label.bind("<Button-1>", on_click)
+        
+        # Store reference for your InputEngine to find
+        # You can now tell your engine: "If this widget is focused, change card's fg_color"
+        return card, path_label
+    
     def browse(self, entry, is_file):
-        path = filedialog.askopenfilename() if is_file else filedialog.askdirectory()
-        if path:
-            entry.delete(0, "end"); entry.insert(0, path)
+        from controller_file_browser import ControllerFileBrowser
+        def on_selected(path):
+            if path:
+                entry.configure(text=path)
+    
+        # Open our controller-friendly browser
+        self.view_state = "browser"
+        self.current_file_browser = ControllerFileBrowser(self, is_file=is_file, callback=on_selected, engine=self.engine)
 
     def add_new_game(self):
         g_id = f"game_{os.urandom(2).hex()}"
@@ -389,7 +500,7 @@ class UmuLauncher(ctk.CTk):
 
     def save_game(self):
         self.games[self.current_game_id].update({
-            "name": self.e_name.get(), "exe": self.e_exe.get(), "prefix": self.e_prefix.get(),
+            "name": self.e_name.label.cget("text"), "exe": self.e_exe_lbl.cget("text"), "prefix": self.e_prefix_lbl.cget("text"),
             "proton": self.e_proton.get(), "gs_on": self.gs_on_var.get(),
             "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script.get()
         })
@@ -404,26 +515,136 @@ class UmuLauncher(ctk.CTk):
             self.refresh_sidebar()
             self.show_welcome()
 
-    def launch_game(self):
-        d = self.games[self.current_game_id]
-        if not d['exe']: return
+    def try_launch_game(self):
+        if getattr(self, "launch_lock", True):
+            return
         
-        env = {**os.environ, "WINEPREFIX": d['prefix']}
-        p_path = self.proton_paths.get(d.get('proton', ""), "")
-        if p_path: env["PROTONPATH"] = p_path
+        if hasattr(self, "is_playing") and self.is_playing:
+                # If already playing, this button acts as "STOP"
+                self.stop_current_game()
+                return
         
-        cmd = []
-        if d.get('script'): cmd.append(d['script'])
-        if d.get('gs_on') and self.has_gamescope:
-            cmd.extend([
-                "gamescope", 
-                "-w", str(d.get('gs_w', "1280")), 
-                "-h", str(d.get('gs_h', "720")), 
-                "-f", "--"
-            ])
+        if not self.current_game_id: return
+        # 1. Lock the UI
+        self.is_playing = True
+        self.launch_lock = True
+        self.play_btn.configure(text="       STOP   ", fg_color=c.DANGER)
+        threading.Thread(target=self.run_game_process, daemon=True).start()
+        self.after(self.launch_lock_cooldown, self.release_launch_lock)
+
+    def release_launch_lock(self):
+        self.launch_lock = False
+
+    def stop_current_game(self):
+        """Deep searches for the game string in all running processes."""
+        if not self.current_game_id: return
         
-        cmd.extend(["umu-run", d['exe']])
-        subprocess.Popen(cmd, env=env)
+        # 1. Get the name from the EXE path and make it lowercase
+        game_data = self.games[self.current_game_id]
+        target_name = os.path.basename(game_data.get("exe")).lower()
+        current_pid = os.getpid() # Get your launcher's PID
+        matches = []
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline', 'create_time']):
+            try:
+                p_name = (proc.info['name'] or "").lower()
+                p_cmd = " ".join(proc.info['cmdline'] or []).lower()
+
+                if target_name in p_name or target_name in p_cmd:
+                    matches.append(proc)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        if matches:
+            # SORT: Newest (highest timestamp) first
+            matches.sort(key=lambda x: x.info['create_time'], reverse=True)
+            
+            for proc in matches:
+                try:
+                    # SAFETY: Don't kill app by mistake!
+                    if proc.info['pid'] == current_pid:
+                        continue
+                    # If it's the actual game (the newest), we terminate it
+                    print(f"DEBUG: Orderly kill of {proc.info['name']} (PID: {proc.info['pid']})")
+                    proc.send_signal(signal.SIGTERM)
+                    
+                    # Give the game a 1-second 'head start' to close before we hit the next process
+                    # This allows gamescope to see the 'Primary child shut down!' message
+                    proc.wait(timeout=1) 
+                except (psutil.NoSuchProcess, psutil.TimeoutExpired):
+                    continue
+        else:
+            # Fallback if no specific EXE found
+            if hasattr(self, "game_process"):
+                self.game_process.terminate()
+        
+        self.game_process = None
+    
+    def run_game_process(self):
+        start_time = time.time()
+        
+        try:
+            d = self.games[self.current_game_id]
+            if not d['exe']: return
+            
+            env = {**os.environ, "WINEPREFIX": d['prefix']}
+            p_path = self.proton_paths.get(d.get('proton', ""), "")
+            if p_path: env["PROTONPATH"] = p_path
+            
+            cmd = []
+            if d.get('script'): cmd.append(d['script'])
+            if d.get('gs_on') and self.has_gamescope:
+                cmd.extend([
+                    "gamescope", 
+                    "-w", str(d.get('gs_w', "1280")), 
+                    "-h", str(d.get('gs_h', "720")), 
+                    "-f", "--"
+                ])
+            
+            cmd.extend(["umu-run", d['exe']])
+
+            # Launch the game and keep a reference to the process
+            self.game_process = subprocess.Popen(cmd, env=env)
+            self.current_running_game_id = self.current_game_id
+
+            # --- MINIMIZE THE APP ---
+            # We do this slightly after the thread starts to ensure 
+            # the OS focus transitions smoothly to the game.
+            self.after(500, self.iconify)
+
+            # This line BLOCKS this thread until the game closes
+            self.game_process.wait() 
+            
+        except Exception as e:
+            print(f"Launch Error: {e}")
+        finally:
+            # --- UNHOOKING ---
+            end_time = time.time()
+            duration_minutes = round((end_time - start_time) / 60, 2)
+            
+            # Save playtime to JSON
+            pt=0
+            cgpt=self.games[self.current_running_game_id].get('playtime')
+            if cgpt:
+                pt = float(cgpt)
+            pt+=duration_minutes
+            self.games[self.current_running_game_id]["playtime"]=str(pt)
+            self.save_data()
+            
+            # Reset UI on the main thread
+            self.after(0, self.reset_ui_after_play)
+
+    def reset_ui_after_play(self):
+        self.is_playing = False
+        self.play_btn.configure(text="PLAY", fg_color=c.BG_FOCUS)
+        self.game_process = None
+        if self.current_running_game_id == self.current_game_id:
+            self.show_dashboard(self.current_game_id) # To force update the playtime
+        
+        # UnMinimize the app after the game closed
+        self.deiconify()
+        self.state('normal') # Forces a redraw of the window state
+        self.lift()          # Standard Tkinter 'bring to front'
+        self.focus_force()
 
     def show_global_settings(self):
         self.view_state = "global_settings"
@@ -539,7 +760,6 @@ class UmuLauncher(ctk.CTk):
 
     def update_status_bar(self):
         """Updates the clock and battery every minute."""
-        import psutil
         # Time
         current_time = time.strftime("%H:%M %p")
         self.lbl_clock.configure(text=current_time)
@@ -789,6 +1009,31 @@ class UmuLauncher(ctk.CTk):
 
         self.after(30, self.animate_icons)
 
+    def format_playtime(self, total_minutes):
+        """Converts 135 minutes to '2h 15m'"""
+        if not total_minutes:
+            return "Not Played yet"
+        m="minute"
+        h="hour"
+
+        total_minutes = float(total_minutes)
+        
+        # 2. If it's less than an hour, just show minutes
+        if total_minutes < 60:
+            value=int(total_minutes)
+            return f"{value} {m if value == 1 else m+"s"}"
+        
+        # 3. Calculate Hours and the REMAINDER (Minutes)
+        hours = total_minutes // 60
+        minutes = total_minutes % 60
+        
+        # 4. If minutes are 0, just show hours (e.g., '3h')
+        if minutes == 0:
+            return f"{hours} {h if hours == 1 else h+'s'}"
+        
+        minutes = int(minutes)
+        hours = int(hours)
+        return f"{hours} {h if hours == 1 else h+'s'} : {minutes} {m if minutes == 1 else m+"s"}"
 
 if __name__ == "__main__":
     app = UmuLauncher()
