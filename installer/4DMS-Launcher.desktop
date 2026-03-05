@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=4DMS Games Launcher
+GenericName=Games Launcher
+Comment=Games Launcher
+Icon=4DMS-Launcher
+Exec=4DMS-Launcher %U
+StartupNotify=true
