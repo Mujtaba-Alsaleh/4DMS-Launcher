@@ -349,6 +349,7 @@ class UmuLauncher(ctk.CTk):
         # 2. Settings Rows (No more clunky boxes)
         self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
         self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
+        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], False)
 
         # 3. Compatibility Layer (OptionMenu)
         comp_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -371,7 +372,7 @@ class UmuLauncher(ctk.CTk):
             gs_container, 
             text="GAMESCOPE: ENABLED" if init_val else "GAMESCOPE: DISABLED",
             font=("Arial", 14, "bold"),
-            fg_color=c.SUCCESS if init_val else "#333333",
+            fg_color=c.SUCCESS if init_val else c.DANGER,
             height=45,
             width=300,
             corner_radius=20,
@@ -393,8 +394,6 @@ class UmuLauncher(ctk.CTk):
         self.gs_h = ctk.CTkEntry(res_row, width=80, state="normal" if self.has_gamescope else "disabled" ,fg_color=c.BG_INPUT, justify="center")
         self.gs_h.insert(0, data.get('gs_h', "720"))
         self.gs_h.pack(side="left", padx=5)
-        #self.e_script = self.create_input(scroll, "Pre-launch Script (Optional)", data.get('script', ""), True)
-        self.e_script=None
 
         # Actions
         act_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -432,7 +431,7 @@ class UmuLauncher(ctk.CTk):
         # 2. Update the button look
         new_val = self.gs_on_var.get()
         status_text = "GAMESCOPE: ENABLED" if new_val else "GAMESCOPE: DISABLED"
-        status_color = c.SUCCESS if new_val else "#333333" # Dim gray when off
+        status_color = c.SUCCESS if new_val else c.DANGER # Dim gray when off
         
         self.gs_toggle_btn.configure(text=status_text, fg_color=status_color)
         
@@ -502,7 +501,7 @@ class UmuLauncher(ctk.CTk):
         self.games[self.current_game_id].update({
             "name": self.e_name.label.cget("text"), "exe": self.e_exe_lbl.cget("text"), "prefix": self.e_prefix_lbl.cget("text"),
             "proton": self.e_proton.get(), "gs_on": self.gs_on_var.get(),
-            "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script.get()
+            "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script_lbl.cget("text")
         })
         self.save_data()
         self.refresh_sidebar()

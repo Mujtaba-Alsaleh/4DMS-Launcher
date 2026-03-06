@@ -10,7 +10,7 @@ class UmuInputEngine:
         self.nav_list = []
         self.nav_index = 0
         self.last_input = 0
-        self.cooldown = 0.2
+        self.cooldown = 0.35
         self.joysticks = []
         self.current_file_browser:ControllerFileBrowser=None
         self.in_file_browser=False
