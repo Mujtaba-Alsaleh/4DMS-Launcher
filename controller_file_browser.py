@@ -5,12 +5,13 @@ class ControllerFileBrowser(ctk.CTkToplevel):
     def __init__(self, parent, is_file=True, is_art=False ,callback=None,engine=None):
         super().__init__(parent)
         self.is_file = is_file
+        self.is_art=is_art
         self.callback = callback
         self.current_path = os.path.expanduser("~")
         self.engine=engine
         # UI Setup
         self.title("Select Path")
-        self.geometry("1024x800")
+        self.geometry("1400x1000")
         self.attributes('-topmost', True)
         if is_art:
             self.allowed_file_extensions = (".jpg", ".png", ".webp","jpeg")
@@ -107,15 +108,15 @@ class ControllerFileBrowser(ctk.CTkToplevel):
     def finish(self, path):
         if self.callback:
             self.callback(path)
-        self.engine.rebuild_nav_map()
         self.engine.in_file_browser=False
-        self.master.view_state="settings"
+        self.master.view_state="dashboard" if self.is_file and self.is_art else "settings"
+        self.engine.rebuild_nav_map()
         self.destroy()
     
     def cancel(self):
-        self.engine.rebuild_nav_map()
         self.engine.in_file_browser=False
-        self.master.view_state="settings"
+        self.master.view_state="dashboard" if self.is_file and self.is_art else "settings"
+        self.engine.rebuild_nav_map()
         self.destroy()
 
     def on_close(self):

@@ -4,6 +4,18 @@ import time
 import customtkinter as ctk
 import colors as c
 from controller_file_browser import ControllerFileBrowser
+import sys
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
 class UmuInputEngine:
     def __init__(self, app):
         self.app = app
@@ -15,11 +27,13 @@ class UmuInputEngine:
         self.current_file_browser:ControllerFileBrowser=None
         self.in_file_browser=False
         
-        self.app.bind("<Any-KeyPress>", lambda e: self.app.toggle_controller_UI(show=False))
-        self.app.bind("<Button-1>", lambda e: self.app.toggle_controller_UI(show=False))
+        self.app.bind("<Any-KeyPress>", lambda e: self.keyboardEvents())
+        self.app.bind("<Button-1>", lambda e: self.keyboardEvents())
 
         self.quit_hold_start=0
         self.quit_duration=2
+        self.sound = SoundManager()
+        self.sound.play_at_vol("launch",0.15) # play launch as a welcome app sound
 
         try:
             os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"
@@ -38,18 +52,15 @@ class UmuInputEngine:
 
     def rebuild_nav_map(self, priority_widget=None):
         self.nav_list = []
-        # 1. Sidebar Games
-        for child in self.app.game_list_frame.winfo_children():
-            if isinstance(child, ctk.CTkButton):
-                self.nav_list.append(child)
-        
-        # 2. Sidebar Action Buttons
+
+        # Sidebar Action Buttons
+        self.nav_list.append(self.app.library_btn)
         self.nav_list.append(self.app.add_btn)
         self.nav_list.append(self.app.settings_btn)
-        if hasattr(self.app, 'exit_btn'):
-            self.nav_list.append(self.app.exit_btn)
+        self.nav_list.append(self.app.exit_btn)
 
-        self._scan_widget_tree(self.app.panel)
+        if self.app.view_state != "sidebar" and self.app.view_state != "welcome":
+            self._scan_widget_tree(self.app.panel)
         
         if priority_widget and priority_widget in self.nav_list:
             self.nav_index = self.nav_list.index(priority_widget)
@@ -63,7 +74,6 @@ class UmuInputEngine:
         self.nav_list = []
         self.current_file_browser=target_app_window
         self._scan_widget_tree(target_app_window)
-        
         if priority_widget and priority_widget in self.nav_list:
             self.nav_index = self.nav_list.index(priority_widget)
         else:
@@ -71,7 +81,29 @@ class UmuInputEngine:
                 self.nav_index = 0
         self.in_file_browser=True
         self.sync_visuals()
+    
+    def rebuild_nav_map_library(self, grid_container, priority_widget=None):
+        self.nav_list = []
+        
+        # Scan only the grid items
+        for child in grid_container.winfo_children():
+            # Depending on your 'create_library_grid', 
+            # this might be the 'card' frame or the button itself
+            if isinstance(child, ctk.CTkButton):
+                self.nav_list.append(child)
+            else:
+                # If posters are inside frames, find the button inside the frame
+                for sub in child.winfo_children():
+                    if isinstance(sub, ctk.CTkButton):
+                        self.nav_list.append(sub)
 
+        if priority_widget and priority_widget in self.nav_list:
+            self.nav_index = self.nav_list.index(priority_widget)
+        else:
+            self.nav_index = 0
+            
+        self.sync_visuals()
+        
     def _scan_widget_tree(self, parent):
         for child in parent.winfo_children():
             if isinstance(child, (ctk.CTkButton, ctk.CTkEntry, ctk.CTkCheckBox, ctk.CTkOptionMenu)):
@@ -133,7 +165,7 @@ class UmuInputEngine:
     def sync_visuals(self):
         """Standardizes visuals using colors.py constants."""
         if not self.nav_list: return
-            
+        
         for w in self.nav_list:
             try:
                 if hasattr(w, 'configure'):
@@ -147,7 +179,8 @@ class UmuInputEngine:
             except: pass
             
         target = self.nav_list[self.nav_index]
-        target.focus_set()
+        if target and hasattr(target,"focus_set()"):
+            target.focus_set()
         
         try:
             # Highlight with the ACCENT color
@@ -174,6 +207,36 @@ class UmuInputEngine:
 
         if self.current_file_browser and self.in_file_browser:
             self.current_file_browser.scroll_to_selected(selected_index=self.nav_index)
+
+        
+        # HIGHLIGHT
+        active_bg = c.get_dimmed_accent(c.ACCENT, factor=0.3)
+        for i, widget in enumerate(self.nav_list):
+            if i == self.nav_index:
+                # Type-safe check: OptionMenu needs special handling
+                if isinstance(widget, ctk.CTkOptionMenu):
+                    widget.configure(
+                        dropdown_fg_color=active_bg,
+                        dropdown_hover_color=active_bg,
+                        button_color=active_bg,
+                        button_hover_color=active_bg
+                    )
+                else:
+                    # Regular Buttons (Posters)
+                    widget.configure(
+                        border_width=3, 
+                        border_color=c.ACCENT, 
+                        fg_color=active_bg 
+                    )
+            else:
+                # Reset inactive widgets
+                if isinstance(widget, ctk.CTkOptionMenu):
+                    widget.configure(dropdown_fg_color=c.BG_INPUT)
+                else:
+                    widget.configure(
+                        border_width=0, 
+                        fg_color=c.BG_INPUT
+                    )
 
     def bounce_icon(self, icon_label):
         """Quickly pops the icon up and drops it back."""
@@ -213,29 +276,34 @@ class UmuInputEngine:
                     # Button A (0) - Select/Press
                     if joy.get_button(0): 
                         self.trigger_input(self.press_current)
+                        self.sound.play("confirm")
                         return # Exit loop after action to prevent double-inputs
                     
                     # Button B (1) - Back
                     elif joy.get_button(1): 
                         self.trigger_input(self.app.handle_back)
+                        self.sound.play("back")
                         return
                     
                     # Button X (2) - Editor
                     elif joy.get_button(2): 
                         self.trigger_input(lambda: self.app.show_editor() if self.app.current_game_id else None)
+                        self.sound.play("confirm")
                         return
                     
                     # Button Y (3) - Context Sensitive
                     elif joy.get_button(3):
                         if self.app.view_state == "settings":
                             self.trigger_input(self.app.save_game)
+                            self.sound.play("confirm")
                         elif self.app.view_state == "dashboard":
-                            self.trigger_input(self.app.select_artwork)
+                            self.trigger_input(self.app.browse_artwork)
                         return
 
                     # Button Start (7) - Launch
                     elif joy.get_button(7): 
-                        self.trigger_input(lambda: self.app.launch_game() if self.app.current_game_id else None)
+                        self.trigger_input(lambda: self.app.try_launch_game() if self.app.current_game_id else None)
+                        self.sound.play("launch")
                         return
 
                     # --- PHASE 3: NAVIGATION (D-Pad & Left Stick) ---
@@ -253,6 +321,8 @@ class UmuInputEngine:
                     if move_x != 0 or move_y != 0:
                         self.last_input = now
                         num_widgets = len(self.nav_list)
+                        self.sound.play("move") #Play move sound
+                        if num_widgets == 0: return
                         
                         if self.in_file_browser:
                             # We assume first 3 widgets are [Select, Cancel, Back]
@@ -287,6 +357,19 @@ class UmuInputEngine:
                                         new_index = header_count + new_grid_idx
                                     else:
                                         new_index = self.nav_index # Stay at bottom
+                        
+                        elif self.app.view_state == "library":
+                            # STEAM GRID LOGIC (5 Columns, no header)
+                            cols = 5
+                            # Horizontal move with wrapping
+                            if move_x != 0:
+                                new_index = (self.nav_index + move_x) % num_widgets
+                            # Vertical move
+                            elif move_y != 0:
+                                new_index = self.nav_index + (move_y * cols)
+                                # Boundary check for vertical
+                                if new_index < 0: new_index = self.nav_index # Stop at top
+                                elif new_index >= num_widgets: new_index = self.nav_index # Stop at bottom
                         else:
                             # Standard Vertical List Wrapping
                             new_index = (self.nav_index + move_y) % num_widgets
@@ -298,6 +381,9 @@ class UmuInputEngine:
                             if self.in_file_browser and self.current_file_browser:
                                 self.current_file_browser.scroll_to_selected(self.nav_index)
                                 self.app.toggle_controller_UI(show=True)
+                            
+                            if self.app.view_state == "library":
+                                self.app.scroll_to_library_item(self.nav_index)
                             return
 
             except pygame.error:
@@ -329,3 +415,60 @@ class UmuInputEngine:
         self.last_input = time.time()
         self.app.toggle_controller_UI(show=True)
         func()
+
+    def keyboardEvents(self):
+        self.app.toggle_controller_UI(show=False)
+        self.sound.play("move")
+        pass
+
+
+
+
+class SoundManager:
+    def __init__(self):
+        try:
+            pygame.mixer.init()
+            self.move = pygame.mixer.Sound(resource_path("resources/navigation.wav"))
+            self.confirm = pygame.mixer.Sound(resource_path("resources/confirm.wav"))
+            self.back = pygame.mixer.Sound(resource_path("resources/back.wav"))
+            self.modal = pygame.mixer.Sound(resource_path("resources/modal.wav"))
+            self.launch = pygame.mixer.Sound(resource_path("resources/launch.wav"))
+            
+            # Set global UI volume
+            for s in [self.confirm, self.back, self.modal]:
+                s.set_volume(0.4)
+            
+            self.move.set_volume(0.1)
+        except Exception as e:
+            print(f"Audio system failed: {e}")
+
+    def play(self, sound_type):
+        try:
+            if sound_type == "move": self.move.play()
+            elif sound_type == "confirm": self.confirm.play()
+            elif sound_type == "back": self.back.play()
+            elif sound_type == "modal": self.modal.play()
+            elif sound_type == "launch": self.launch.play()
+        except: pass
+    
+    def play_at_vol(self,sound_type,vol=0.2):
+        try:
+            match sound_type:
+                case "move":
+                    self.move.set_volume(vol)
+                    self.move.play()
+                case "confirm":
+                    self.confirm.set_volume(vol)
+                    self.confirm.play()
+                case "back":
+                    self.back.set_volume(vol)
+                    self.back.play()
+                case "modal":
+                    self.modal.set_volume(vol)
+                    self.modal.play()
+                case "launch":
+                    self.launch.set_volume(vol)
+                    self.launch.play()
+                case _:
+                    pass
+        except: pass

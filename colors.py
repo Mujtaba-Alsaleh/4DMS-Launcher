@@ -70,3 +70,13 @@ def apply_theme(theme_name):
     BG_FOCUS = t["BG_FOCUS"]
     TXT_MAIN = t["TXT_MAIN"]
     TXT_DIM = t["TXT_DIM"]
+
+def get_dimmed_accent(hex_color, factor=0.4):
+    """Multiplies a hex color by a factor to get a darker version."""
+    hex_color = hex_color.lstrip('#')
+    # Convert hex to RGB
+    rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+    # Multiply each channel
+    dimmed_rgb = tuple(max(0, min(255, int(c * factor))) for c in rgb)
+    # Convert back to hex
+    return '#{:02x}{:02x}{:02x}'.format(*dimmed_rgb)

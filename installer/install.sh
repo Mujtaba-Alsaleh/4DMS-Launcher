@@ -18,6 +18,7 @@ DESKTOPFILE_TARGET="$HOME/.local/share/applications/"
 
 if [[ ! -f "$PROGRAM" ]]; then
   echo "program file not found. Exiting.."
+  echo "Hint: cd into the install directory before running again"
   sleep 0.2
   exit 1
 fi

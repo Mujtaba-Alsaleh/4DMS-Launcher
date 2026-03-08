@@ -80,8 +80,12 @@ class UmuLauncher(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar, text="4DMS", font=("Arial", 28, "bold"), text_color=c.ACCENT)
         self.logo_label.pack(pady=30)
         
-        self.game_list_frame = ctk.CTkScrollableFrame(self.sidebar, fg_color="transparent",scrollbar_button_color=c.ACCENT,scrollbar_button_hover_color=c.ACCENT_HOVER)
-        self.game_list_frame.pack(fill="both", expand=True, padx=10)
+        self.library_btn = ctk.CTkButton(self.sidebar, text="Library", 
+                                     height=50, font=("Arial", 14, "bold"),
+                                     fg_color=c.BG_INPUT,
+                                     hover_color=c.ACCENT_HOVER,
+                                     command=self.show_library)
+        self.library_btn.pack(pady=25,padx=20)
         
         self.add_btn = ctk.CTkButton(self.sidebar, text="+ ADD NEW GAME", 
                                      height=50, font=("Arial", 14, "bold"),
@@ -213,44 +217,120 @@ class UmuLauncher(ctk.CTk):
             json.dump(self.games, f, indent=4)
 
     def handle_back(self):
+        priority_widget=None
         if self.view_state == "settings":
             self.show_dashboard(self.current_game_id)
+            priority_widget=self.e_name
         elif self.view_state == "browser" and self.current_file_browser:
             self.current_file_browser.handle_select("..")
             return
-        else:
+        elif self.view_state == "library":
+            self.view_state = "sidebar"
+            priority_widget=self.library_btn
+        elif self.view_state == "global_settings":
             self.show_welcome()
-        self.engine.rebuild_nav_map()
+            priority_widget=self.library_btn
+        elif self.view_state == "dashboard":
+            self.show_library()
+            return
+        
+        self.engine.rebuild_nav_map(priority_widget=priority_widget)
 
     def refresh_sidebar(self):
-        for w in self.game_list_frame.winfo_children(): w.destroy()
-        for g_id, data in self.games.items():
-            # SKIP the settings key! Only process game IDs
-            if g_id == "settings": continue 
-            img=self.get_art_image(data.get('art'),size=(64,64))
-            btn = ctk.CTkButton(
-                    self.game_list_frame, 
-                    text=f"  {data['name']}", 
-                    anchor="w", 
-                    height=64, 
-                    fg_color="transparent",
-                    image=img,
-                    text_color=c.TXT_MAIN,
-                    hover_color=c.BG_INPUT,
-                    command=lambda i=g_id: self.show_dashboard(i)
-            )
-            btn.pack(fill="x", pady=2)
+        self.show_welcome()
         self.engine.rebuild_nav_map()
 
     def show_welcome(self):
         self.view_state = "welcome"
-        self.current_game_id = None
         for w in self.content_container.winfo_children(): w.destroy()
         self.clear_controller_ui()
         ctk.CTkLabel(self.content_container, 
                      text="Welcome to 4DMS Launcher\nSelect a game or press + to add one", 
                      font=("Arial", 18), 
                      text_color=c.TXT_DIM).place(relx=0.5, rely=0.5, anchor="center")
+
+    def show_library(self):
+        self.view_state = "library"
+        self.clear_controller_ui()
+        
+        # 1. Setup Scrollable Frame
+        for w in self.content_container.winfo_children(): w.destroy()
+        self.library_scroll = ctk.CTkScrollableFrame(self.content_container, fg_color="transparent")
+        self.library_scroll.pack(fill="both", expand=True)
+        
+        # 2. Setup Grid Container (Use fill="x" to prevent centering issues)
+        grid = ctk.CTkFrame(self.library_scroll, fg_color="transparent")
+        grid.pack(fill="x", expand=True, padx=20, pady=20)
+        
+        num_cols = 5
+        for i in range(num_cols):
+            grid.grid_columnconfigure(i, weight=1, uniform="lib")
+
+        # 3. Filter and Add Games
+        # This ensures 'i' starts at 0 for the first valid game
+        library_games = [(g_id, data) for g_id, data in self.games.items() if g_id != "settings"]
+
+        for i, (g_id, data) in enumerate(library_games):
+                # 1. The Card Container (Invisible, used for layout)
+                card = ctk.CTkFrame(grid, fg_color="transparent")
+                card.grid(row=i // num_cols, column=i % num_cols, padx=15, pady=20, sticky="nsew")
+
+                # 2. The Poster Button
+                # We use a fixed 2:3 ratio (e.g., 180x270) for that Steam look
+                art=data.get("art")
+                poster_btn = ctk.CTkButton(
+                    card,
+                    text="", # Text only if no image
+                    image=self.get_art_image(art),
+                    width=180,
+                    height=270,
+                    corner_radius=12,
+                    fg_color=c.BG_INPUT,
+                    border_width=0, # We will set this to 2 in sync_visuals when selected
+                    command=lambda id=g_id: self.show_dashboard(id)
+                )
+                poster_btn.pack(fill="both", expand=True)
+
+                # 3. The Game Title (Below the Art)
+                # We use a small, bold label with 'wraplength' to handle long names
+                lbl = ctk.CTkLabel(
+                    card, 
+                    text=data.get('name').upper(), 
+                    font=("Arial", 11, "bold"),
+                    text_color=c.TXT_MAIN,
+                    wraplength=170
+                )
+                lbl.pack(pady=(8, 0))
+
+        # 4. Connect to Engine
+        self.engine.rebuild_nav_map_library(grid)
+
+    def scroll_to_library_item(self, index):
+        if not hasattr(self, 'library_scroll'): return
+        
+        canvas = self.library_scroll._parent_canvas
+        widgets = self.engine.nav_list
+        if not widgets or index >= len(widgets): return
+
+        target = widgets[index]
+        self.update_idletasks() # Force geometry update
+        
+        y_pos = target.winfo_y()
+        item_height = target.winfo_height()
+        total_height = canvas.bbox("all")[3] 
+        
+        if total_height <= 0: return
+
+        # Fractions for scroll position
+        scroll_top = y_pos / total_height
+        scroll_bottom = (y_pos + item_height) / total_height
+        current_min, current_max = canvas.yview()
+
+        if scroll_top < current_min:
+            canvas.yview_moveto(scroll_top - 0.01)
+        elif scroll_bottom > current_max:
+            view_size = current_max - current_min
+            canvas.yview_moveto(scroll_bottom - view_size + 0.01)
 
     def show_dashboard(self, g_id):
         self.clear_controller_ui()
@@ -482,10 +562,11 @@ class UmuLauncher(ctk.CTk):
         def on_selected(path):
             if path:
                 entry.configure(text=path)
-    
+        
+        self.after(50,self.engine.sound.play("modal"))
         # Open our controller-friendly browser
         self.view_state = "browser"
-        self.current_file_browser = ControllerFileBrowser(self, is_file=is_file, callback=on_selected, engine=self.engine)
+        self.current_file_browser = ControllerFileBrowser(self,is_file=is_file, callback=on_selected, engine=self.engine)
 
     def add_new_game(self):
         g_id = f"game_{os.urandom(2).hex()}"
@@ -700,15 +781,16 @@ class UmuLauncher(ctk.CTk):
         self.configure(fg_color=c.BG_MAIN)
         self.sidebar.configure(fg_color=c.BG_PANEL)
         self.content_container.configure(fg_color=c.BG_MAIN)
-        
-        # 2. Sidebar Internal Scroll Frame
-        # We set it to transparent or BG_PANEL to match the sidebar
-        self.game_list_frame.configure(fg_color="transparent") 
-        
-        # 3. Sidebar Header & Action Buttons
+          
+        # 2. Sidebar Header & Action Buttons
         if hasattr(self, 'logo_label'):
             self.logo_label.configure(text_color=c.ACCENT)
-            
+
+        self.library_btn.configure(
+            fg_color=c.BG_INPUT, 
+            hover_color=c.ACCENT_HOVER,
+            text_color=c.TXT_MAIN
+        )
         self.add_btn.configure(
             fg_color=c.BG_INPUT, 
             hover_color=c.ACCENT_HOVER,
@@ -723,7 +805,6 @@ class UmuLauncher(ctk.CTk):
         self.logo_container.configure(image=logo)
         self.logo_container.image=logo
         self.panel.configure(fg_color=c.BG_MAIN)
-        self.game_list_frame.configure(scrollbar_button_color=c.ACCENT,scrollbar_button_hover_color=c.ACCENT_HOVER)
         self.lbl_clock.configure(text_color=c.TXT_MAIN)
         self.lbl_battery.configure(text_color=c.TXT_DIM)
 
@@ -813,10 +894,12 @@ class UmuLauncher(ctk.CTk):
         from controller_file_browser import ControllerFileBrowser
         def on_selected(path):
             self.select_artwork(path)
+
+        self.after(50,self.engine.sound.play("modal"))
     
         # Open our controller-friendly browser
         self.view_state = "browser"
-        self.current_file_browser = ControllerFileBrowser(self, is_file=True,is_art=True ,callback=on_selected, engine=self.engine)
+        self.current_file_browser = ControllerFileBrowser(self,is_file=True,is_art=True ,callback=on_selected, engine=self.engine)
 
     def remove_artwork(self):
         """deletes art, and updates JSON."""
