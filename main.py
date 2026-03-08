@@ -44,7 +44,7 @@ class UmuLauncher(ctk.CTk):
 
         # Window Setup
         self.title("4DMS Launcher")
-        self.geometry("1600x1000")
+        self.geometry("1600x1200")
         ctk.set_appearance_mode("dark")
         self.current_theme=""
         self.controller_ui_visible=False
@@ -304,7 +304,7 @@ class UmuLauncher(ctk.CTk):
 
         self.art_btn = ctk.CTkButton(self.content_container, text="       SET ARTWORK   ",anchor='w',
                                      compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,
-                                     command=self.select_artwork)
+                                     command=self.browse_artwork)
         self.art_btn.pack(pady=10)
 
         if ctk_img: # that mean image exist
@@ -349,7 +349,7 @@ class UmuLauncher(ctk.CTk):
         # 2. Settings Rows (No more clunky boxes)
         self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
         self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
-        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], False)
+        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], True)
 
         # 3. Compatibility Layer (OptionMenu)
         comp_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -490,9 +490,11 @@ class UmuLauncher(ctk.CTk):
     def add_new_game(self):
         g_id = f"game_{os.urandom(2).hex()}"
         self.games[g_id] = {
-            "name": "New Game", "exe": "", 
+            "name": "New Game", 
+            "exe": "", 
             "prefix": str(pathlib.Path.home() / "Games" / "umu-prefixes" / g_id),
-            "gs_on": False, "gs_w": "1280", "gs_h": "800"
+            "gs_on": False, "gs_w": "1280", "gs_h": "800",
+            "script": ""
         }
         self.current_game_id = g_id
         self.show_editor()
@@ -775,14 +777,14 @@ class UmuLauncher(ctk.CTk):
         # Update every 30 seconds
         self.after(30000, self.update_status_bar)
 
-    def select_artwork(self):
+    def select_artwork(self,file_path):
         """Opens file dialog, copies image, deletes old version, and updates JSON."""
         if not self.current_game_id: return
         
-        file_path = filedialog.askopenfilename(
-            filetypes=[("Image files", "*.jpg *.jpeg *.png *.webp")]
-        )
-        
+        # file_path = filedialog.askopenfilename(
+        #     filetypes=[("Image files", "*.jpg *.jpeg *.png *.webp")]
+        # )
+
         if file_path:
             # --- NEW CLEANUP LOGIC ---
             # Check if there's already an existing art path in our data
@@ -806,7 +808,16 @@ class UmuLauncher(ctk.CTk):
             self.save_data()
             self.show_dashboard(self.current_game_id)
             self.refresh_sidebar()
+
+    def browse_artwork(self):
+        from controller_file_browser import ControllerFileBrowser
+        def on_selected(path):
+            self.select_artwork(path)
     
+        # Open our controller-friendly browser
+        self.view_state = "browser"
+        self.current_file_browser = ControllerFileBrowser(self, is_file=True,is_art=True ,callback=on_selected, engine=self.engine)
+
     def remove_artwork(self):
         """deletes art, and updates JSON."""
         if not self.current_game_id: return
@@ -824,7 +835,7 @@ class UmuLauncher(ctk.CTk):
         self.save_data()
         self.show_dashboard(self.current_game_id)
         self.refresh_sidebar()
-    
+
     def clear_all_artwork(self):
         """Deletes every image in the Artwork folder and resets JSON entries."""
         # 1. Physical file deletion

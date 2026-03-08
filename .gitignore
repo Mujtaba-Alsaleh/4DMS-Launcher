@@ -5,3 +5,5 @@ build/*
 commands.txt
 dist/*
 temp/*
+installer/4DMS-Launcher
+/installer/bin

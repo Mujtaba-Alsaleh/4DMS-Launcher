@@ -72,7 +72,6 @@ class UmuInputEngine:
         self.in_file_browser=True
         self.sync_visuals()
 
-
     def _scan_widget_tree(self, parent):
         for child in parent.winfo_children():
             if isinstance(child, (ctk.CTkButton, ctk.CTkEntry, ctk.CTkCheckBox, ctk.CTkOptionMenu)):
@@ -173,7 +172,7 @@ class UmuInputEngine:
             if anchor_widget == current_widget:
                 self.bounce_icon(self.app.icon_labels[key])
 
-        if self.in_file_browser and self.current_file_browser:
+        if self.current_file_browser and self.in_file_browser:
             self.current_file_browser.scroll_to_selected(selected_index=self.nav_index)
 
     def bounce_icon(self, icon_label):

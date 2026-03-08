@@ -2,7 +2,7 @@ import os
 import customtkinter as ctk
 import colors as c
 class ControllerFileBrowser(ctk.CTkToplevel):
-    def __init__(self, parent, is_file=True, callback=None,engine=None):
+    def __init__(self, parent, is_file=True, is_art=False ,callback=None,engine=None):
         super().__init__(parent)
         self.is_file = is_file
         self.callback = callback
@@ -12,7 +12,13 @@ class ControllerFileBrowser(ctk.CTkToplevel):
         self.title("Select Path")
         self.geometry("1024x800")
         self.attributes('-topmost', True)
+        if is_art:
+            self.allowed_file_extensions = (".jpg", ".png", ".webp","jpeg")
+        else:
+            self.allowed_file_extensions = (".exe",".sh")
         
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
         self.list_frame = ctk.CTkScrollableFrame(self)
         self.list_frame.pack(fill="both", expand=True, padx=10, pady=10)
         
@@ -53,7 +59,7 @@ class ControllerFileBrowser(ctk.CTkToplevel):
         try:
             items = sorted(os.listdir(self.current_path))
             valid_items = [i for i in items if os.path.isdir(os.path.join(self.current_path, i)) or 
-                        (self.is_file and i.lower().endswith(".exe"))]
+                        (self.is_file and i.lower().endswith(self.allowed_file_extensions))]
 
             for i, item in enumerate(valid_items):
                 full_path = os.path.join(self.current_path, item)
@@ -111,6 +117,9 @@ class ControllerFileBrowser(ctk.CTkToplevel):
         self.engine.in_file_browser=False
         self.master.view_state="settings"
         self.destroy()
+
+    def on_close(self):
+        self.cancel()
 
     def scroll_to_selected(self, selected_index):
         """Accurate scrolling by comparing screen coordinates."""

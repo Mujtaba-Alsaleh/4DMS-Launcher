@@ -12,7 +12,7 @@ NAME="4DMS-Launcher"
 ICON="icon.png"
 DESKTOPFILE="4DMS-Launcher.desktop"
 ICON_TARGET="/usr/share/icons/hicolor/64x64/apps/"
-PROGRAM="$WORKINGDIRECTORY/$NAME"
+PROGRAM="$WORKINGDIRECTORY/bin/$NAME"
 PROGRAM_PATH_TARGET="/usr/local/bin/"
 DESKTOPFILE_TARGET="$HOME/.local/share/applications/"
 
