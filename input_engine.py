@@ -222,12 +222,21 @@ class UmuInputEngine:
                         button_hover_color=active_bg
                     )
                 else:
-                    # Regular Buttons (Posters)
-                    widget.configure(
-                        border_width=3, 
-                        border_color=c.ACCENT, 
-                        fg_color=active_bg 
-                    )
+                    try: # Try applying hover_color if not valid do it with out it
+                        # Regular Buttons (Posters)
+                        widget.configure(
+                            border_width=3, 
+                            border_color=c.ACCENT, 
+                            fg_color=active_bg,
+                            hover_color=c.ACCENT_HOVER
+                        )
+                    except:
+                        # Regular Buttons (Posters)
+                        widget.configure(
+                            border_width=3, 
+                            border_color=c.ACCENT, 
+                            fg_color=active_bg 
+                        )
             else:
                 # Reset inactive widgets
                 if isinstance(widget, ctk.CTkOptionMenu):

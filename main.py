@@ -286,6 +286,7 @@ class UmuLauncher(ctk.CTk):
                     height=270,
                     corner_radius=12,
                     fg_color=c.BG_INPUT,
+                    hover_color=c.ACCENT_HOVER,
                     border_width=0, # We will set this to 2 in sync_visuals when selected
                     command=lambda id=g_id: self.show_dashboard(id)
                 )
@@ -372,18 +373,21 @@ class UmuLauncher(ctk.CTk):
         self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
                                 compound="left", width=220, height=70,anchor='w',
                                 state=play_btn_state, 
-                                fg_color=play_btn_color, font=("Arial", 22, "bold"),
+                                fg_color=play_btn_color, 
+                                hover_color=c.ACCENT_HOVER,
+                                font=("Arial", 22, "bold"),
                                 command=self.try_launch_game)
         self.play_btn.pack(side="left", padx=15)
 
         edit_btn = ctk.CTkButton(btn_frame, text="       SETTINGS   ",anchor='w',
                                 compound="left", width=140, height=70, 
                                 fg_color=c.BG_INPUT,
+                                hover_color=c.ACCENT_HOVER,
                                 command=self.show_editor)
         edit_btn.pack(side="left", padx=15)
 
         self.art_btn = ctk.CTkButton(self.content_container, text="       SET ARTWORK   ",anchor='w',
-                                     compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,
+                                     compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,hover_color=c.ACCENT_HOVER,
                                      command=self.browse_artwork)
         self.art_btn.pack(pady=10)
 
@@ -453,6 +457,7 @@ class UmuLauncher(ctk.CTk):
             text="GAMESCOPE: ENABLED" if init_val else "GAMESCOPE: DISABLED",
             font=("Arial", 14, "bold"),
             fg_color=c.SUCCESS if init_val else c.DANGER,
+            hover_color=c.ACCENT_HOVER,
             height=45,
             width=300,
             corner_radius=20,
@@ -479,8 +484,8 @@ class UmuLauncher(ctk.CTk):
         act_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         act_frame.pack(pady=40)
         
-        ctk.CTkButton(act_frame, text="SAVE CHANGES", width=180, height=50, fg_color=c.SUCCESS, command=self.save_game).pack(side="left", padx=10)
-        ctk.CTkButton(act_frame, text="DELETE", width=100, height=50, fg_color=c.DANGER, command=self.delete_game).pack(side="left", padx=10)
+        ctk.CTkButton(act_frame, text="SAVE CHANGES", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, command=self.save_game).pack(side="left", padx=10)
+        ctk.CTkButton(act_frame, text="DELETE", width=100, height=50, fg_color=c.DANGER, hover_color=c.DANGER_HOVER,command=self.delete_game).pack(side="left", padx=10)
 
         footer_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         footer_frame.pack(side="bottom", pady=10)
@@ -543,7 +548,7 @@ class UmuLauncher(ctk.CTk):
 
         icon = "📄" if is_file else "📁"
         ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file), 
-                    fg_color="transparent",anchor="n").pack(side="right", padx=15)
+                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n").pack(side="right", padx=15)
 
         # 5. Controller/Mouse Binding
         # We bind the click to the frame AND the labels inside it
