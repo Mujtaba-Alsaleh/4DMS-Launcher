@@ -7,3 +7,5 @@ dist/*
 temp/*
 installer/4DMS-Launcher
 /installer/bin
+/main.dist
+4DMS-Launcher

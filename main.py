@@ -17,14 +17,14 @@ import psutil
 import signal
 
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
+    # For Nuitka-compiled binaries
+    if "__compiled__" in globals():
+        return os.path.join(os.path.dirname(__file__), relative_path)
+    # For PyInstaller-bundled binaries
+    elif hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    # For standard Python execution
+    return os.path.join(os.path.abspath("."), relative_path)
 
 # --- Configuration Paths ---
 CONFIG_DIR = pathlib.Path(os.getenv("XDG_CONFIG_HOME", pathlib.Path.home() / ".config")) / "4DMS-Launcher"
