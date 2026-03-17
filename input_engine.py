@@ -26,6 +26,7 @@ class UmuInputEngine:
         self.joysticks = []
         self.current_file_browser:ControllerFileBrowser=None
         self.in_file_browser=False
+        self.on_screen_keyboard_open=False
         
         self.app.bind("<Any-KeyPress>", lambda e: self.keyboardEvents())
         self.app.bind("<Button-1>", lambda e: self.keyboardEvents())
@@ -264,7 +265,7 @@ class UmuInputEngine:
                 return 
         except Exception: 
             return
-        
+
         self.refresh_hardware()
         pygame.event.pump()
         
@@ -272,6 +273,15 @@ class UmuInputEngine:
         # Tracking state for this specific frame across ALL controllers
         any_view_button_held = False
         cooldown_active = (now - self.last_input < self.cooldown)
+                
+                
+        if self.on_screen_keyboard_open: 
+            for joy in self.joysticks:
+                if joy.get_button(1): # Button B to check if keyboard is closed
+                    self.on_screen_keyboard_open = False
+                    self.last_input = time.time()
+                    break
+            return
 
         # --- PHASE 1: SENSOR SWEEP (Check all joysticks) ---
         for joy in self.joysticks:

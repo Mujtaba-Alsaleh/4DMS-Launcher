@@ -7,3 +7,4 @@ Comment=Games Launcher
 Icon=4DMS-Launcher
 Exec=4DMS-Launcher %U
 StartupNotify=true
+Categories=Games;

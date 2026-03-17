@@ -15,6 +15,14 @@ import math
 import threading
 import psutil
 import signal
+import csv
+import re
+
+def normalize(text):
+    """Converts 'wUthering-waves' -> 'wutheringwaves'"""
+    if not text: return ""
+    # Remove all non-alphanumeric characters and lowercase it
+    return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
 
 def resource_path(relative_path):
     # For Nuitka-compiled binaries
@@ -41,7 +49,7 @@ class UmuLauncher(ctk.CTk):
         self.has_umu = None
         self.check_dependencies()
         self.ensure_data_file()
-
+        self.load_umu_database()
         # Window Setup
         self.title("4DMS Launcher")
         self.geometry("1600x1200")
@@ -401,12 +409,37 @@ class UmuLauncher(ctk.CTk):
         self.anchor_icon("X",edit_btn)
         self.anchor_icon("Y",self.art_btn)
 
-        self.info_str = f"Proton: {data.get('proton')}\nGamescope: {'Enabled' if data.get('gs_on') and self.has_gamescope else 'Disabled'}\nPrefix: {data.get('prefix')}\nExecutable: {data.get('exe')}\nPlaytime: {self.format_playtime(data.get('playtime'))}"
-        ctk.CTkLabel(self.content_container, text=self.info_str, text_color=c.TXT_DIM).pack(pady=20)
+        self.create_info_panel(self.content_container, data)
         
         self.engine.rebuild_nav_map(priority_widget=self.play_btn)
         self.update_idletasks()     # FORCE the window to calculate widget positions NOW
         self.after(50,self.update_controller_icons()) # delay it a bit for smoother pop in
+
+    def create_info_panel(self, parent, data):
+        info_container = ctk.CTkFrame(parent, fg_color="transparent")
+        info_container.pack(fill="x", padx=20, pady=10)
+
+        # Helper to add rows
+        def add_row(label, value, val_color=c.TXT_MAIN):
+            row = ctk.CTkFrame(info_container, fg_color="transparent")
+            row.pack(fill="x", pady=2)
+            
+            ctk.CTkLabel(row, text=label, font=("Arial", 11, "bold"), text_color="gray").pack(side="left")
+            ctk.CTkLabel(row, text=value, font=("Arial", 11), text_color=val_color).pack(side="right")
+
+        # Draw the rows
+        add_row("PROTON", data.get('proton'), c.ACCENT)
+        
+        add_row("PREFIX", data.get('prefix'), "#bbbbbb")
+        
+        gs_active = data.get('gs_on') and self.has_gamescope
+        add_row("GAMESCOPE", "ENABLED" if gs_active else "DISABLED", "#2ecc71" if gs_active else "#e74c3c")
+        
+        hud_active = data.get('useMangoHud', False)
+        add_row("MANGOHUD", "ACTIVE" if hud_active else "OFF", "#2ecc71" if hud_active else "gray")
+        
+        add_row("PLAYTIME", self.format_playtime(data.get('playtime')), c.ACCENT)
+
 
     def show_editor(self):
         self.check_dependencies() # Refresh check
@@ -424,16 +457,23 @@ class UmuLauncher(ctk.CTk):
         def on_name_changed(new_name):
             print(f"Updating JSON with new name: {new_name}")
             data['name'] = new_name
+            self.get_umu_id_pressed(new_name, data.get('store', 'none')) # Refresh the UMU ID if the name changes
 
         # 1. Title Area (Hero Section)
         # Give the game name massive priority
-        self.e_name = EditableTitle(scroll, data['name'], callback=on_name_changed)
+        self.e_name = EditableTitle(scroll, data['name'], self.engine ,callback=on_name_changed)
         self.e_name.pack(pady=(20, 40), fill="x")
 
-        # 2. Settings Rows (No more clunky boxes)
-        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
+        # 2. Settings Rows
+        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)        
         self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
         self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], True)
+
+        self.umu_id_lbl:ctk.CTkLabel = ctk.CTkLabel(scroll, text=data.get('GAMEID', "Not Set"), font=("Arial", 12), text_color=c.TXT_DIM)
+        self.umu_id_lbl.pack()
+        self.umu_id_btn = ctk.CTkButton(scroll, text="Get/Refresh GAMEID", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, command=lambda: self.get_umu_id_pressed(data['name'], data.get('store', 'none')))
+        self.umu_id_btn.pack()
+
 
         # 3. Compatibility Layer (OptionMenu)
         comp_frame = ctk.CTkFrame(scroll, fg_color="transparent")
@@ -480,6 +520,11 @@ class UmuLauncher(ctk.CTk):
         self.gs_h.insert(0, data.get('gs_h', "720"))
         self.gs_h.pack(side="left", padx=5)
 
+        self.useMangoHud = ctk.BooleanVar(value=data.get('useMangoHud', False))
+        self.useMangoHudToggle = ctk.CTkButton(scroll, text="MangoHud: ON" if self.useMangoHud.get() else "MangoHud: OFF", font=("Arial", 12),
+                                                fg_color=c.SUCCESS if self.useMangoHud.get() else c.DANGER, hover_color=c.ACCENT_HOVER, command=self.toggle_mangohud)
+        self.useMangoHudToggle.pack()
+
         # Actions
         act_frame = ctk.CTkFrame(scroll, fg_color="transparent")
         act_frame.pack(pady=40)
@@ -525,6 +570,15 @@ class UmuLauncher(ctk.CTk):
         self.gs_w.configure(state=state)
         self.gs_h.configure(state=state)
 
+    def toggle_mangohud(self):
+        current_val = self.useMangoHud.get()
+        self.useMangoHud.set(not current_val)
+        new_val = self.useMangoHud.get()
+        self.useMangoHudToggle.configure(text="MangoHud: ON" if new_val else "MangoHud: OFF", fg_color=c.SUCCESS if new_val else c.DANGER)
+
+    def editor_clear_label(self,target:ctk.CTkLabel):
+        target.configure(text="")
+
     def create_setting_row(self, parent, label_text, value, is_file=True):
         """Creates a clean, transparent row that the controller can highlight as a whole."""
         # 1. Outer container for spacing
@@ -547,9 +601,11 @@ class UmuLauncher(ctk.CTk):
         path_label.pack(side="left", padx=15, fill="x", expand=True)
 
         icon = "📄" if is_file else "📁"
+        ctk.CTkButton(card, text="❌", font=("Arial", 14),command=lambda: self.editor_clear_label(path_label), 
+                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n").pack(side="right", padx=15)
         ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file), 
                     fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n").pack(side="right", padx=15)
-
+        
         # 5. Controller/Mouse Binding
         # We bind the click to the frame AND the labels inside it
         def on_click(event=None):
@@ -589,7 +645,9 @@ class UmuLauncher(ctk.CTk):
         self.games[self.current_game_id].update({
             "name": self.e_name.label.cget("text"), "exe": self.e_exe_lbl.cget("text"), "prefix": self.e_prefix_lbl.cget("text"),
             "proton": self.e_proton.get(), "gs_on": self.gs_on_var.get(),
-            "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script_lbl.cget("text")
+            "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script_lbl.cget("text"),
+            "GAMEID": self.umu_id_lbl.cget("text"),
+            "useMangoHud": self.useMangoHud.get()
         })
         self.save_data()
         self.refresh_sidebar()
@@ -612,6 +670,12 @@ class UmuLauncher(ctk.CTk):
                 return
         
         if not self.current_game_id: return
+        d = self.games[self.current_game_id]
+        proton = d.get('proton', "")
+        p_path = self.proton_paths.get(proton, "")
+        if not p_path:  
+            self.play_btn.configure(text="Non-valid Proton version selected\nPlease change it in the game settings", fg_color=c.DANGER)
+            return
         # 1. Lock the UI
         self.is_playing = True
         self.launch_lock = True
@@ -668,38 +732,56 @@ class UmuLauncher(ctk.CTk):
     
     def run_game_process(self):
         start_time = time.time()
-        
+        d = self.games[self.current_game_id]
+        proton = d.get('proton', "")
+        if not proton:  return
+        p_path = self.proton_paths.get(proton, "")
+        if not p_path:  return
+        gameid=d.get('GAMEID', "0")
+
         try:
-            d = self.games[self.current_game_id]
             if not d['exe']: return
+            if not p_path: return
+            # 1. Build the Heroic-style Environment
+            mangohud= "1" if d.get('useMangoHud', False) else "0"
+            env = {
+                    **os.environ,
+                    "WINEPREFIX": d['prefix'],
+                    "MANGOHUD" : mangohud,
+                    "STEAM_COMPAT_DATA_PATH": d['prefix'],
+                    "STEAM_COMPAT_CLIENT_INSTALL_PATH": os.path.expanduser("~/.steam/steam"),
+                    "PROTONPATH": p_path,
+                    # --- IDENTITY ---
+                    "STEAM_COMPAT_APP_ID": gameid,
+                    "SteamAppId": gameid,
+                    "GAMEID": gameid,
+                    # --- STABILITY ---
+                    "WINEDLLOVERRIDES": "winemenubuilder.exe=d;mscoree=d;mshtml=d",
+                    "PROTON_NO_ESYNC": "0",
+                    "PROTON_NO_FSYNC": "0",
+                
+                    # Heroic disables winemenubuilder to prevent explorer.exe crashes
+                    "WINEDLLOVERRIDES": "winemenubuilder.exe=d"
+            }
             
-            env = {**os.environ, "WINEPREFIX": d['prefix']}
-            p_path = self.proton_paths.get(d.get('proton', ""), "")
-            if p_path: env["PROTONPATH"] = p_path
-            
+
+
+            # 2. Command Construction
             cmd = []
-            if d.get('script'): cmd.append(d['script'])
             if d.get('gs_on') and self.has_gamescope:
                 cmd.extend([
-                    "gamescope", 
-                    "-w", str(d.get('gs_w', "1280")), 
-                    "-h", str(d.get('gs_h', "720")), 
-                    "-f", "--"
+                    "gamescope", "-w", str(d.get('gs_w', "1280")), 
+                    "-h", str(d.get('gs_h', "720")), "-f", "--"
                 ])
             
+            # We still use umu-run but with our manual env vars to force the handshake
             cmd.extend(["umu-run", d['exe']])
 
-            # Launch the game and keep a reference to the process
             self.game_process = subprocess.Popen(cmd, env=env)
             self.current_running_game_id = self.current_game_id
 
-            # --- MINIMIZE THE APP ---
-            # We do this slightly after the thread starts to ensure 
-            # the OS focus transitions smoothly to the game.
             self.after(500, self.iconify)
-
-            # This line BLOCKS this thread until the game closes
-            self.game_process.wait() 
+            self.game_process.wait()
             
         except Exception as e:
             print(f"Launch Error: {e}")
@@ -707,7 +789,7 @@ class UmuLauncher(ctk.CTk):
             # --- UNHOOKING ---
             end_time = time.time()
             duration_minutes = round((end_time - start_time) / 60, 2)
-            
+
             # Save playtime to JSON
             pt=0
             cgpt=self.games[self.current_running_game_id].get('playtime')
@@ -716,7 +798,7 @@ class UmuLauncher(ctk.CTk):
             pt+=duration_minutes
             self.games[self.current_running_game_id]["playtime"]=str(pt)
             self.save_data()
-            
+
             # Reset UI on the main thread
             self.after(0, self.reset_ui_after_play)
 
@@ -1132,6 +1214,70 @@ class UmuLauncher(ctk.CTk):
         minutes = int(minutes)
         hours = int(hours)
         return f"{hours} {h if hours == 1 else h+'s'} : {minutes} {m if minutes == 1 else m+"s"}"
+
+
+    def load_umu_database(self):
+        """Parses the UMU CSV into a searchable dictionary."""
+        self.umu_db = {}
+        csv_path = resource_path("resources/umu-database.csv")
+        
+        if not os.path.exists(csv_path):
+            print("UMU Database not found!")
+            return
+
+        try:
+            with open(csv_path, mode='r', encoding='utf-8') as f:
+                # Use DictReader to automatically map headers to keys
+                reader = csv.DictReader(f)
+                for row in reader:
+                        norm_title = normalize(row['TITLE'])
+                        norm_store = normalize(row['STORE'])
+                        umu_id = row['UMU_ID']
+
+                        # 1. Store by Specific ID (e.g., 'borderlands3|egs')
+                        self.umu_db[f"{norm_title}|{norm_store}"] = umu_id
+                        
+                        # 2. Store by Title only (e.g., 'wutheringwaves')
+                        # This acts as a fallback if the store isn't specified
+                        if norm_title not in self.umu_db:
+                            self.umu_db[norm_title] = umu_id
+        except Exception as e:
+            print(f"Error parsing UMU CSV: {e}")
+
+    def get_umu_id_pressed(self, title, store):
+        """Handler for when the UMU ID button is pressed."""
+        umu_id = self.get_umu_id(title, store)
+        print(f"UMU ID for '{title}' ({store}): {umu_id}")
+        if self.umu_id_lbl is not None:
+            self.umu_id_lbl.configure(text=umu_id)
+
+    def get_umu_id(self, title, store="none"):
+        """Search for a UMU ID based on title and store."""
+        if not hasattr(self, 'umu_db'): return "0"
+
+        n_title = normalize(title)
+        n_store = normalize(store)
+
+        # Try exact match with store first
+        match = self.umu_db.get(f"{n_title}|{n_store}")
+        if match: return match
+
+        # Try title only (this covers 'WutheringWaves' or 'wuthering-waves')
+        match = self.umu_db.get(n_title)
+        if match: return match
+
+        # --- ULTIMATE SMART FALLBACK: Fuzzy Search ---
+        # If still no match, find the 'closest' title in the DB (catches 'Wuthering Wavs')
+        import difflib
+        all_titles = [k for k in self.umu_db.keys() if '|' not in k]
+        closest = difflib.get_close_matches(n_title, all_titles, n=1, cutoff=0.7)
+        
+        if closest:
+            return self.umu_db[closest[0]]
+
+        return "0"
+
+
 
 if __name__ == "__main__":
     app = UmuLauncher()
