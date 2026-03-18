@@ -768,6 +768,8 @@ class UmuLauncher(ctk.CTk):
 
             # 2. Command Construction
             cmd = []
+            cmd.extend([d.get('script')]) if d.get('script') else None
+
             if d.get('gs_on') and self.has_gamescope:
                 cmd.extend([
                     "gamescope", "-w", str(d.get('gs_w', "1280")), 
