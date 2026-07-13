@@ -1,12 +1,14 @@
 import os
+import argparse
 import json
 import subprocess
 import pathlib
 import customtkinter as ctk
-from tkinter import filedialog, messagebox
 from input_engine import UmuInputEngine
 from editable_title import EditableTitle
 import colors as c
+from pfx_creator import PrefixCreator
+from controller_confirm_modal import ControllerConfirmModal
 import time
 from PIL import Image
 import shutil
@@ -44,6 +46,12 @@ ARTWORK_DIR.mkdir(parents=True, exist_ok=True)
 class UmuLauncher(ctk.CTk):
     def __init__(self):
         super().__init__()
+
+        # Parse arguments
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--fullscreen', action='store_true', help='Force fullscreen geometry for Gamescope')
+        args = parser.parse_args()
+
         
         self.has_gamescope = None
         self.has_umu = None
@@ -52,7 +60,16 @@ class UmuLauncher(ctk.CTk):
         self.load_umu_database()
         # Window Setup
         self.title("4DMS Launcher")
-        self.geometry("1600x1200")
+
+        if args.fullscreen:
+            w = self.winfo_screenwidth()
+            h = self.winfo_screenheight()
+            self.geometry(f"{w}x{h}+0+0")
+            self.overrideredirect(True) #Remove window decorations
+        else:
+            # Default windowed size
+            self.geometry("1600x1200")
+
         ctk.set_appearance_mode("dark")
         self.current_theme=""
         self.controller_ui_visible=False
@@ -88,30 +105,40 @@ class UmuLauncher(ctk.CTk):
         self.logo_label = ctk.CTkLabel(self.sidebar, text="4DMS", font=("Arial", 28, "bold"), text_color=c.ACCENT)
         self.logo_label.pack(pady=30)
         
-        self.library_btn = ctk.CTkButton(self.sidebar, text="Library", 
+        self.library_btn = ctk.CTkButton(self.sidebar, text="🎮 Library",
                                      height=50, font=("Arial", 14, "bold"),
-                                     fg_color=c.BG_INPUT,
+                                     fg_color=c.ACCENT,
                                      hover_color=c.ACCENT_HOVER,
                                      command=self.show_library)
         self.library_btn.pack(pady=25,padx=20)
         
         self.add_btn = ctk.CTkButton(self.sidebar, text="+ ADD NEW GAME", 
                                      height=50, font=("Arial", 14, "bold"),
-                                     fg_color=c.BG_INPUT,
+                                    fg_color=c.ACCENT,
                                      hover_color=c.ACCENT_HOVER,
                                      command=self.add_new_game)
         self.add_btn.pack(pady=25, padx=20)
 
-        self.settings_btn = ctk.CTkButton(self.sidebar, text="⚙ SETTINGS", 
+
+
+        self.prefix_creator_btn = ctk.CTkButton(self.sidebar, text="📦 Prefix Creator",
                                         height=50, font=("Arial", 14, "bold"),
-                                        fg_color="transparent",
+                                        fg_color=c.ACCENT,
+                                        hover_color=c.ACCENT_HOVER,
+                                        command=self.create_pfx_menu)
+        self.prefix_creator_btn.pack(pady=20, padx=20)
+
+        self.settings_btn = ctk.CTkButton(self.sidebar, text="⚙ SETTINGS",
+                                        height=50, font=("Arial", 14, "bold"),
+                                        fg_color=c.ACCENT,
+                                        hover_color=c.ACCENT_HOVER,
                                         command=self.show_global_settings)
         self.settings_btn.pack(pady=20, padx=20)
 
-        self.exit_btn = ctk.CTkButton(self.sidebar, text="          ✖ EXIT",compound="left",anchor='w',
+        self.exit_btn = ctk.CTkButton(self.sidebar, text="✖ EXIT",font=("Arial", 14, "bold"),
                                       fg_color="transparent",
                                       text_color=c.DANGER,
-                                      width=220,height=70,
+                                      height=50,
                                       hover_color=c.ACCENT_HOVER, # Subtle dark red hover
                                       command=self.quit)
         self.exit_btn.pack(side="bottom", pady=20, padx=20)
@@ -238,8 +265,13 @@ class UmuLauncher(ctk.CTk):
         elif self.view_state == "global_settings":
             self.show_welcome()
             priority_widget=self.library_btn
+        elif self.view_state == "prefix_creator":
+            self.show_welcome()
+            priority_widget=self.library_btn
         elif self.view_state == "dashboard":
             self.show_library()
+            return
+        elif self.view_state == "confirm_modal":
             return
         
         self.engine.rebuild_nav_map(priority_widget=priority_widget)
@@ -368,6 +400,7 @@ class UmuLauncher(ctk.CTk):
         
 
         play_btn_state = "normal" if self.has_umu else "disabled"
+        play_btn_color = c.SUCCESS # Default
         if self.has_umu and not self.is_playing:
             play_btn_text="       PLAY   "
             play_btn_color=c.SUCCESS
@@ -440,6 +473,24 @@ class UmuLauncher(ctk.CTk):
         
         add_row("PLAYTIME", self.format_playtime(data.get('playtime')), c.ACCENT)
 
+    def spawn_toplevel(self,parent, title="Window"):
+        win = ctk.CTkToplevel(parent)
+        win.title(title)
+        win.transient(parent)
+        win.geometry("1600x1200")
+        #win.grab_set()
+
+        # Cleanup logic
+        win.protocol("WM_DELETE_WINDOW", win.destroy)
+        return win
+
+    def open_editor_pfx_creator(self):
+        def on_finish(new_val):
+            self.e_prefix_lbl.configure(text=new_val)
+
+        win = self.spawn_toplevel(self,"PFX Creator")
+        frame = PrefixCreator(master=win,browser_callback=self.browse,on_finish_callback=on_finish)
+        frame.pack(fill="both", expand=True)
 
     def show_editor(self):
         self.check_dependencies() # Refresh check
@@ -465,13 +516,32 @@ class UmuLauncher(ctk.CTk):
         self.e_name.pack(pady=(20, 40), fill="x")
 
         # 2. Settings Rows
-        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)        
+        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
         self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
-        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], True)
+        self.usePrefixCreatorForPFX= ctk.BooleanVar(value=False)
+        def toggle_use_pfx_creator():
+            current_val = self.usePrefixCreatorForPFX.get()
+            self.usePrefixCreatorForPFX.set(not current_val)
+            new_val = self.usePrefixCreatorForPFX.get()
+            self.usePrefixCreatorForPFXToggle.configure(text="Use Prefix creator for WINEPREFIX PATH: ✔️" if new_val else "Use Prefix creator for WINEPREFIX PATH: ❌", fg_color=c.SUCCESS if new_val else c.DANGER)
 
+            if new_val:
+                self.e_prefix_btn.configure(command=self.open_editor_pfx_creator)
+                self.e_prefix_btn.configure(text="🛠️")
+            else:
+                self.e_prefix_btn.configure(command=lambda: self.browse(self.e_prefix_lbl,False))
+                self.e_prefix_btn.configure(text="📁")
+
+
+        self.usePrefixCreatorForPFXToggle = ctk.CTkButton(scroll, text="Use Prefix creator for WINEPREFIX PATH: ❌", font=("Arial", 12),
+                                                fg_color=c.SUCCESS if self.usePrefixCreatorForPFX.get() else c.DANGER, hover_color=c.ACCENT_HOVER, command=toggle_use_pfx_creator)
+        self.usePrefixCreatorForPFXToggle.pack()
+
+        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], True)
         self.umu_id_lbl:ctk.CTkLabel = ctk.CTkLabel(scroll, text=data.get('GAMEID', "Not Set"), font=("Arial", 12), text_color=c.TXT_DIM)
         self.umu_id_lbl.pack()
-        self.umu_id_btn = ctk.CTkButton(scroll, text="Get/Refresh GAMEID", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, command=lambda: self.get_umu_id_pressed(data['name'], data.get('store', 'none')))
+        self.umu_id_btn = ctk.CTkButton(scroll, text="Get/Refresh GAMEID", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER,
+                                        command=lambda: self.get_umu_id_pressed(data['name'], data.get('store', 'none')))
         self.umu_id_btn.pack()
 
 
@@ -530,7 +600,7 @@ class UmuLauncher(ctk.CTk):
         act_frame.pack(pady=40)
         
         ctk.CTkButton(act_frame, text="SAVE CHANGES", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, command=self.save_game).pack(side="left", padx=10)
-        ctk.CTkButton(act_frame, text="DELETE", width=100, height=50, fg_color=c.DANGER, hover_color=c.DANGER_HOVER,command=self.delete_game).pack(side="left", padx=10)
+        ctk.CTkButton(act_frame, text="DELETE", width=100, height=50, fg_color=c.DANGER, hover_color=c.DANGER_HOVER,command=lambda: self.spawn_controller_confirm_modal(self.delete_game)).pack(side="left", padx=10)
 
         footer_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         footer_frame.pack(side="bottom", pady=10)
@@ -579,7 +649,7 @@ class UmuLauncher(ctk.CTk):
     def editor_clear_label(self,target:ctk.CTkLabel):
         target.configure(text="")
 
-    def create_setting_row(self, parent, label_text, value, is_file=True):
+    def create_setting_row(self, parent, label_text, value, is_file=True) -> tuple[ctk.CTkButton , ctk.CTkLabel]:
         """Creates a clean, transparent row that the controller can highlight as a whole."""
         # 1. Outer container for spacing
         wrapper = ctk.CTkFrame(parent, fg_color="transparent")
@@ -601,10 +671,11 @@ class UmuLauncher(ctk.CTk):
         path_label.pack(side="left", padx=15, fill="x", expand=True)
 
         icon = "📄" if is_file else "📁"
-        ctk.CTkButton(card, text="❌", font=("Arial", 14),command=lambda: self.editor_clear_label(path_label), 
-                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n").pack(side="right", padx=15)
-        ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file), 
-                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n").pack(side="right", padx=15)
+        ctk.CTkButton(card, text="❌", font=("Arial", 14),command=lambda: self.editor_clear_label(path_label),
+                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n",width=5).pack(side="right", padx=15)
+        btn = ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file),
+                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n",width=5)
+        btn.pack(side="right", padx=15)
         
         # 5. Controller/Mouse Binding
         # We bind the click to the frame AND the labels inside it
@@ -614,9 +685,8 @@ class UmuLauncher(ctk.CTk):
         card.bind("<Button-1>", on_click)
         path_label.bind("<Button-1>", on_click)
         
-        # Store reference for your InputEngine to find
-        # You can now tell your engine: "If this widget is focused, change card's fg_color"
-        return card, path_label
+        #return card, path_label
+        return btn, path_label
     
     def browse(self, entry, is_file):
         from controller_file_browser import ControllerFileBrowser
@@ -654,11 +724,29 @@ class UmuLauncher(ctk.CTk):
         self.show_dashboard(self.current_game_id)
 
     def delete_game(self):
-        if messagebox.askyesno("Confirm", "Are you sure you want to remove this game?"):
-            del self.games[self.current_game_id]
-            self.save_data()
-            self.refresh_sidebar()
-            self.show_welcome()
+        del self.games[self.current_game_id]
+        self.save_data()
+        self.refresh_sidebar()
+        self.show_welcome()
+
+    def spawn_controller_confirm_modal(self,func):
+        current_view_state = self.view_state
+        self.view_state = "confirm_modal"
+
+        def on_user_decision(confirmed: bool):
+            """This function runs ONLY after the user clicks a button"""
+            print("on_user_decision")
+            if confirmed:
+                print("User confirmed! Proceeding with logic...")
+                func()
+            else:
+                print("User cancelled.")
+
+            self.view_state = current_view_state
+            self.engine.rebuild_nav_map()
+
+        # Create modal (Non-blocking)
+        modal = ControllerConfirmModal(self, engine=self.engine,on_result=on_user_decision)
 
     def try_launch_game(self):
         if getattr(self, "launch_lock", True):
@@ -817,6 +905,18 @@ class UmuLauncher(ctk.CTk):
         self.lift()          # Standard Tkinter 'bring to front'
         self.focus_force()
 
+    def create_pfx_menu(self):
+        self.view_state = "prefix_creator"
+        for w in self.content_container.winfo_children(): w.destroy()
+        self.clear_controller_ui()
+
+        frame = PrefixCreator(
+            master=self.content_container,
+            browser_callback=self.browse
+            )
+        frame.pack(fill="both", expand=True)
+        self.engine.rebuild_nav_map()
+
     def show_global_settings(self):
         self.view_state = "global_settings"
         for w in self.content_container.winfo_children(): w.destroy()
@@ -829,7 +929,7 @@ class UmuLauncher(ctk.CTk):
         self.theme_menu.set(self.games.get("settings", {}).get("theme", "Deep Blue"))
         self.theme_menu.pack(pady=10)
         
-        save_btn = ctk.CTkButton(self.content_container, text="APPLY & RESTART", fg_color=c.ACCENT, 
+        save_btn = ctk.CTkButton(self.content_container, text="APPLY THEME", fg_color=c.ACCENT, hover_color=c.ACCENT_HOVER ,
                                  command=self.save_global_settings)
         save_btn.pack(pady=20)
 
@@ -876,20 +976,32 @@ class UmuLauncher(ctk.CTk):
             self.logo_label.configure(text_color=c.ACCENT)
 
         self.library_btn.configure(
-            fg_color=c.BG_INPUT, 
+            fg_color=c.ACCENT,
             hover_color=c.ACCENT_HOVER,
             text_color=c.TXT_MAIN
         )
         self.add_btn.configure(
-            fg_color=c.BG_INPUT, 
+            fg_color=c.ACCENT,
             hover_color=c.ACCENT_HOVER,
             text_color=c.TXT_MAIN
         )
-        self.settings_btn.configure(
-            fg_color="transparent",
-            text_color=c.TXT_DIM,
-            hover_color=c.BG_INPUT
+        self.prefix_creator_btn.configure(
+            fg_color=c.ACCENT,
+            text_color=c.TXT_MAIN,
+            hover_color=c.ACCENT_HOVER
         )
+        self.settings_btn.configure(
+            fg_color=c.ACCENT,
+            text_color=c.TXT_MAIN,
+            hover_color=c.ACCENT_HOVER
+        )
+
+        self.exit_btn.configure(
+            fg_color=c.DANGER,
+            text_color=c.TXT_MAIN,
+            hover_color=c.DANGER_HOVER
+        )
+
         logo = self.get_resources_icon(self.select_logo(),size=(128,128))
         self.logo_container.configure(image=logo)
         self.logo_container.image=logo
@@ -950,10 +1062,6 @@ class UmuLauncher(ctk.CTk):
     def select_artwork(self,file_path):
         """Opens file dialog, copies image, deletes old version, and updates JSON."""
         if not self.current_game_id: return
-        
-        # file_path = filedialog.askopenfilename(
-        #     filetypes=[("Image files", "*.jpg *.jpeg *.png *.webp")]
-        # )
 
         if file_path:
             # --- NEW CLEANUP LOGIC ---
@@ -1216,7 +1324,6 @@ class UmuLauncher(ctk.CTk):
         minutes = int(minutes)
         hours = int(hours)
         return f"{hours} {h if hours == 1 else h+'s'} : {minutes} {m if minutes == 1 else m+"s"}"
-
 
     def load_umu_database(self):
         """Parses the UMU CSV into a searchable dictionary."""

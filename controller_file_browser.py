@@ -1,6 +1,7 @@
 import os
 import customtkinter as ctk
 import colors as c
+from controller_confirm_modal import ControllerConfirmModal
 class ControllerFileBrowser(ctk.CTkToplevel):
     def __init__(self, parent, is_file=True, is_art=False ,callback=None,engine=None):
         super().__init__(parent)
@@ -37,14 +38,24 @@ class ControllerFileBrowser(ctk.CTkToplevel):
 
         if not self.is_file:
             select_btn = ctk.CTkButton(header, 
-                text=f"➔ SELECT FOLDER: {os.path.basename(self.current_path) or self.current_path}",
-                fg_color=c.SUCCESS, height=40, font=("Arial", 13, "bold"),
+                text=f"➔ SELECT DIRECTORY: {os.path.basename(self.current_path) or self.current_path}",
+                fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, height=40, font=("Arial", 13, "bold"),
                 command=lambda: self.finish(self.current_path))
             select_btn.pack(side="left", expand=True, fill="x", padx=5)
+            create_btn = ctk.CTkButton(header,
+                                       text="+ New",
+                                       fg_color=c.ACCENT,
+                                       hover_color=c.ACCENT_HOVER,
+                                       height=40,
+                                       width=100,
+                                       font=("Arial",13,"bold"),
+                                       command=self.ask_directory_creation
+                                       )
+            create_btn.pack(side="right", padx=5)
 
-        ctk.CTkButton(header, text="✖ Cancel", fg_color=c.DANGER, width=100, height=40,
+        ctk.CTkButton(header, text="✖ Cancel", fg_color=c.DANGER,hover_color=c.DANGER_HOVER, width=100, height=40,
                     command=self.cancel).pack(side="right", padx=5)
-        ctk.CTkButton(header, text="⮬ Back", fg_color="#3d3d3d", width=100, height=40,
+        ctk.CTkButton(header, text="⮬ Back", fg_color=c.ACCENT,hover_color=c.ACCENT_HOVER, width=100, height=40,
                     command=lambda: self.handle_select("..")).pack(side="right", padx=5)
 
         # --- The Grid Container ---
@@ -66,7 +77,7 @@ class ControllerFileBrowser(ctk.CTkToplevel):
                 full_path = os.path.join(self.current_path, item)
                 is_dir = os.path.isdir(full_path)
                 
-                color = "#1f538d" if is_dir else "#2b2b2b"
+                #color = "#1f538d" if is_dir else "#2b2b2b"
                 icon = "📁" if is_dir else "📄"
                 
                 # Wrap text to keep boxes uniform
@@ -75,7 +86,8 @@ class ControllerFileBrowser(ctk.CTkToplevel):
                 btn = ctk.CTkButton(
                     grid_container,
                     text=display_name,
-                    fg_color=color,
+                    fg_color=c.ACCENT,
+                    hover_color=c.ACCENT_HOVER,
                     height=90,
                     width=100, # Minimum width, weight=1 will stretch it
                     corner_radius=8,
@@ -121,6 +133,27 @@ class ControllerFileBrowser(ctk.CTkToplevel):
 
     def on_close(self):
         self.cancel()
+
+
+    def create_directory(self):
+        path = os.path.join(self.current_path,"pfx")
+        if os.path.exists(path):
+            return
+        os.makedirs(path,exist_ok=True)
+        self.refresh_list()
+
+    def on_user_decision(self,confirmed: bool):
+        """This function runs ONLY after the user clicks a button"""
+        self.update_idletasks()
+        self.engine.rebuild_nav_map_file_browser(self)
+        if confirmed:
+            print("User confirmed! Proceeding with logic...")
+            self.create_directory()
+        else:
+            print("User cancelled.")
+
+    def ask_directory_creation(self):
+        modal = ControllerConfirmModal(self, engine=self.engine,on_result=self.on_user_decision,msg=f"create new folder at {os.path.join(self.current_path,"pfx")}?")
 
     def scroll_to_selected(self, selected_index):
         """Accurate scrolling by comparing screen coordinates."""

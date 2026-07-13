@@ -57,6 +57,7 @@ class UmuInputEngine:
         # Sidebar Action Buttons
         self.nav_list.append(self.app.library_btn)
         self.nav_list.append(self.app.add_btn)
+        self.nav_list.append(self.app.prefix_creator_btn)
         self.nav_list.append(self.app.settings_btn)
         self.nav_list.append(self.app.exit_btn)
 
@@ -82,6 +83,14 @@ class UmuInputEngine:
                 self.nav_index = 0
         self.in_file_browser=True
         self.sync_visuals()
+
+    def rebuild_nav_map_modal(self, modal):
+        self.nav_list = []
+        self._scan_widget_tree(modal)
+        self.nav_index = 0
+
+        self.sync_visuals()
+
     
     def rebuild_nav_map_library(self, grid_container, priority_widget=None):
         self.nav_list = []
@@ -261,9 +270,9 @@ class UmuInputEngine:
     def update(self):
         # 1. Global Focus & Safety Guard
         try:
-            if not self.app.focus_displayof(): 
-                return 
-        except Exception: 
+            if not self.app.focus_displayof():
+                return
+        except Exception:
             return
 
         self.refresh_hardware()
@@ -322,7 +331,8 @@ class UmuInputEngine:
                     # Button Start (7) - Launch
                     elif joy.get_button(7): 
                         self.trigger_input(lambda: self.app.try_launch_game() if self.app.current_game_id else None)
-                        self.sound.play("launch")
+                        if self.app.current_game_id:
+                            self.sound.play("launch")
                         return
 
                     # --- PHASE 3: NAVIGATION (D-Pad & Left Stick) ---
@@ -429,6 +439,8 @@ class UmuInputEngine:
             if self.quit_hold_start != 0:
                 self.quit_hold_start = 0
                 self.app.hide_quit_progress()
+
+        #print(f"update loop end tick {time.time()}")
 
     def trigger_input(self, func):
         self.last_input = time.time()
