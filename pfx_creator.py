@@ -103,6 +103,13 @@ class PrefixCreator(ctk.CTkFrame):
                                        fg_color=c.SUCCESS, hover_color=c.get_dimmed_accent(c.SUCCESS, 0.8),
                                        text_color=c.BG_MAIN, font=("Arial", 16, "bold"))
         self.btn_start.pack(side="left", padx=10, fill="x", expand=True)
+        
+        if self.on_close_callback:
+            self.btn_close = ctk.CTkButton(btn_frame, text="Cancel",
+                                        command=self.on_close, height=45,
+                                        fg_color=c.DANGER, hover_color=c.get_dimmed_accent(c.DANGER_HOVER, 0.8),
+                                        text_color=c.BG_MAIN, font=("Arial", 16, "bold"))
+            self.btn_close.pack(side="left", padx=10, fill="x", expand=True)
 
         # --- Section 4: Live Log ---
         ctk.CTkLabel(self.main_frame, text="Installation Log",

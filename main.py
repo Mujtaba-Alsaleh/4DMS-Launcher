@@ -68,7 +68,7 @@ class UmuLauncher(ctk.CTk):
             self.overrideredirect(True) #Remove window decorations
         else:
             # Default windowed size
-            self.geometry("1600x1200")
+            self.geometry("1920x1200")
 
         ctk.set_appearance_mode("dark")
         self.current_theme=""
@@ -135,7 +135,7 @@ class UmuLauncher(ctk.CTk):
                                         command=self.show_global_settings)
         self.settings_btn.pack(pady=20, padx=20)
 
-        self.exit_btn = ctk.CTkButton(self.sidebar, text="✖ EXIT",font=("Arial", 14, "bold"),
+        self.exit_btn = ctk.CTkButton(self.sidebar, text="✖ EXIT       ",anchor='center',font=("Arial", 14, "bold"),
                                       fg_color="transparent",
                                       text_color=c.DANGER,
                                       height=50,
@@ -271,7 +271,7 @@ class UmuLauncher(ctk.CTk):
         elif self.view_state == "dashboard":
             self.show_library()
             return
-        elif self.view_state == "confirm_modal":
+        elif self.view_state == "modal":
             return
         
         self.engine.rebuild_nav_map(priority_widget=priority_widget)
@@ -298,42 +298,44 @@ class UmuLauncher(ctk.CTk):
         self.library_scroll = ctk.CTkScrollableFrame(self.content_container, fg_color="transparent")
         self.library_scroll.pack(fill="both", expand=True)
         
-        # 2. Setup Grid Container (Use fill="x" to prevent centering issues)
+        # 2. Setup Grid Container
         grid = ctk.CTkFrame(self.library_scroll, fg_color="transparent")
-        grid.pack(fill="x", expand=True, padx=20, pady=20)
+        # Removing expand=True here stops the grid frame from forcefully bloating horizontally
+        grid.pack(fill="x", padx=20, pady=20)
         
         num_cols = 5
         for i in range(num_cols):
-            grid.grid_columnconfigure(i, weight=1, uniform="lib")
+            # FIXED: Removed weight=1. This locks columns down to the exact size of your cards 
+            # instead of inflating them to fit widescreen monitors.
+            grid.grid_columnconfigure(i, uniform="lib")
 
         # 3. Filter and Add Games
-        # This ensures 'i' starts at 0 for the first valid game
         library_games = [(g_id, data) for g_id, data in self.games.items() if g_id != "settings"]
 
         for i, (g_id, data) in enumerate(library_games):
-                # 1. The Card Container (Invisible, used for layout)
+                # 1. The Card Container
                 card = ctk.CTkFrame(grid, fg_color="transparent")
                 card.grid(row=i // num_cols, column=i % num_cols, padx=15, pady=20, sticky="nsew")
 
                 # 2. The Poster Button
-                # We use a fixed 2:3 ratio (e.g., 180x270) for that Steam look
-                art=data.get("art")
+                art = data.get("art")
                 poster_btn = ctk.CTkButton(
                     card,
-                    text="", # Text only if no image
+                    text="",
                     image=self.get_art_image(art),
-                    width=180,
-                    height=270,
+                    width=180,    # Hard physical size boundaries
+                    height=270,   # Hard physical size boundaries
                     corner_radius=12,
                     fg_color=c.BG_INPUT,
                     hover_color=c.ACCENT_HOVER,
-                    border_width=0, # We will set this to 2 in sync_visuals when selected
+                    border_width=0, 
                     command=lambda id=g_id: self.show_dashboard(id)
                 )
-                poster_btn.pack(fill="both", expand=True)
+                # FIXED: Removed fill="both" and expand=True. 
+                # This guarantees Tkinter forces the widget to honor exactly 180x270 pixels.
+                poster_btn.pack()
 
                 # 3. The Game Title (Below the Art)
-                # We use a small, bold label with 'wraplength' to handle long names
                 lbl = ctk.CTkLabel(
                     card, 
                     text=data.get('name').upper(), 
@@ -389,8 +391,8 @@ class UmuLauncher(ctk.CTk):
             ctk.CTkLabel(self.content_container, image=ctk_img, text="").pack(pady=(20, 0))
         else:
             # Placeholder if no art exists
-            ctk.CTkFrame(self.content_container, width=400, height=225, 
-                         fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(pady=(20, 0))
+            ctk.CTkFrame(self.content_container, width=225, height=400, 
+                         fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(padx=20,pady=20)
 
         ctk.CTkLabel(self.content_container, text=data['name'], 
                      font=("Arial", 48, "bold"), text_color=c.TXT_MAIN).pack(pady=(20, 10))
@@ -402,17 +404,17 @@ class UmuLauncher(ctk.CTk):
         play_btn_state = "normal" if self.has_umu else "disabled"
         play_btn_color = c.SUCCESS # Default
         if self.has_umu and not self.is_playing:
-            play_btn_text="       PLAY   "
+            play_btn_text="PLAY"
             play_btn_color=c.SUCCESS
         elif self.is_playing:
-            play_btn_text="       STOP   "
+            play_btn_text="STOP"
             play_btn_color=c.DANGER
         else:
-            play_btn_text="       UMU MISSING   "
+            play_btn_text="UMU MISSING"
             play_btn_color="#444444"
 
         self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
-                                compound="left", width=220, height=70,anchor='w',
+                                compound="left", width=220, height=70,anchor='center',
                                 state=play_btn_state, 
                                 fg_color=play_btn_color, 
                                 hover_color=c.ACCENT_HOVER,
@@ -420,20 +422,21 @@ class UmuLauncher(ctk.CTk):
                                 command=self.try_launch_game)
         self.play_btn.pack(side="left", padx=15)
 
-        edit_btn = ctk.CTkButton(btn_frame, text="       SETTINGS   ",anchor='w',
+
+        edit_btn = ctk.CTkButton(btn_frame, text="SETTINGS",anchor='center',
                                 compound="left", width=140, height=70, 
                                 fg_color=c.BG_INPUT,
                                 hover_color=c.ACCENT_HOVER,
                                 command=self.show_editor)
         edit_btn.pack(side="left", padx=15)
 
-        self.art_btn = ctk.CTkButton(self.content_container, text="       SET ARTWORK   ",anchor='w',
+        self.art_btn = ctk.CTkButton(self.content_container, text=" SET ARTWORK",anchor='center',
                                      compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,hover_color=c.ACCENT_HOVER,
                                      command=self.browse_artwork)
         self.art_btn.pack(pady=10)
 
         if ctk_img: # that mean image exist
-            rm_art_btn = ctk.CTkButton(self.content_container, text="REMOVE ARTWORK",anchor='w',
+            rm_art_btn = ctk.CTkButton(self.content_container, text="   REMOVE ARTWORK",anchor='center',
                                      compound="left", width=20, height=20,fg_color=c.DANGER,hover_color=c.DANGER_HOVER, text_color=c.TXT_DIM,
                                      command=self.remove_artwork)
             rm_art_btn.pack(padx=10)
@@ -487,144 +490,214 @@ class UmuLauncher(ctk.CTk):
     def open_editor_pfx_creator(self):
         def on_finish(new_val):
             self.e_prefix_lbl.configure(text=new_val)
+            self.view_state = "settings"
             self.engine.rebuild_nav_map()
         def on_close():
+            self.view_state = "settings"
             self.engine.rebuild_nav_map()
 
         win = self.spawn_toplevel(self,"PFX Creator")
         frame = PrefixCreator(master=win,browser_callback=self.browse,on_finish_callback=on_finish,on_close_callback=on_close)
         frame.pack(fill="both", expand=True)
         self.engine.rebuild_nav_map_modal(frame)
+        self.view_state = "modal"
 
     def show_editor(self):
-        self.check_dependencies() # Refresh check
+        self.check_dependencies() 
         self.view_state = "settings"
         data = self.games[self.current_game_id]
         for w in self.content_container.winfo_children(): w.destroy()
 
         self.clear_controller_ui()
 
-        scroll = ctk.CTkScrollableFrame(self.content_container, fg_color="transparent",scrollbar_button_color=c.ACCENT,scrollbar_button_hover_color=c.ACCENT_HOVER)
-        scroll.pack(fill="both", expand=True, padx=20, pady=20)
+        # Main static frame layout that scales beautifully to fit the screen bounds
+        main_layout = ctk.CTkFrame(self.content_container, fg_color="transparent")
+        main_layout.pack(fill="both", expand=True, padx=20, pady=(10, 5))
 
-        ctk.CTkLabel(scroll, text="Game Settings", font=("Arial", 24, "bold"), text_color=c.ACCENT).pack(pady=10)
+        # ==========================================
+        # 1. HERO HEADER AREA (Compact centered layout)
+        # ==========================================
+        header_frame = ctk.CTkFrame(main_layout, fg_color="transparent")
+        header_frame.pack(fill="x", pady=(0, 12))
+        
+        ctk.CTkLabel(
+            header_frame, text="GAME MANAGEMENT", 
+            font=("Arial", 11, "bold"), text_color=c.TXT_DIM
+        ).pack(anchor="center")
         
         def on_name_changed(new_name):
-            print(f"Updating JSON with new name: {new_name}")
             data['name'] = new_name
-            self.get_umu_id_pressed(new_name, data.get('store', 'none')) # Refresh the UMU ID if the name changes
+            self.get_umu_id_pressed(new_name, data.get('store', 'none'))
 
-        # 1. Title Area (Hero Section)
-        # Give the game name massive priority
-        self.e_name = EditableTitle(scroll, data['name'], self.engine ,callback=on_name_changed)
-        self.e_name.pack(pady=(20, 40), fill="x")
+        self.e_name = EditableTitle(header_frame, data['name'], self.engine, callback=on_name_changed)
+        self.e_name.pack(pady=(2, 0), anchor="center")
 
-        # 2. Settings Rows
-        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(scroll, "Executable Path", data['exe'], True)
-        self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(scroll, "WINEPREFIX Path", data['prefix'], False)
-        self.usePrefixCreatorForPFX= ctk.BooleanVar(value=False)
+        # ==========================================
+        # TWO-COLUMN CARD WRAPPER
+        # ==========================================
+        layout_grid = ctk.CTkFrame(main_layout, fg_color="transparent")
+        layout_grid.pack(fill="both", expand=True)
+        layout_grid.grid_columnconfigure(0, weight=1, uniform="columns")
+        layout_grid.grid_columnconfigure(1, weight=1, uniform="columns")
+
+        # ==========================================
+        # 2. LEFT CARD: DIRECTORIES & PATHS
+        # ==========================================
+        path_card = ctk.CTkFrame(layout_grid, fg_color=c.BG_PANEL, corner_radius=12, border_color=c.BG_FOCUS, border_width=1)
+        path_card.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=5)
+        
+        inner_left = ctk.CTkFrame(path_card, fg_color="transparent")
+        inner_left.pack(fill="both", expand=True, padx=15, pady=12)
+        
+        ctk.CTkLabel(inner_left, text="FILES & DIRECTORIES", font=("Arial", 13, "bold"), text_color=c.ACCENT).pack(anchor="w", pady=(0, 8))
+
+        # Path Setup Rows
+        self.e_exe_btn, self.e_exe_lbl = self.create_setting_row(inner_left, "Executable Path", data['exe'], True)
+        self.e_prefix_btn, self.e_prefix_lbl = self.create_setting_row(inner_left, "WINEPREFIX Path", data['prefix'], False)
+        
+        # Prefix Mode Toggle Switch Button
+        self.usePrefixCreatorForPFX = ctk.BooleanVar(value=False)
         def toggle_use_pfx_creator():
             current_val = self.usePrefixCreatorForPFX.get()
             self.usePrefixCreatorForPFX.set(not current_val)
             new_val = self.usePrefixCreatorForPFX.get()
-            self.usePrefixCreatorForPFXToggle.configure(text="Use Prefix creator for WINEPREFIX PATH: ✔️" if new_val else "Use Prefix creator for WINEPREFIX PATH: ❌", fg_color=c.SUCCESS if new_val else c.DANGER)
-
+            self.usePrefixCreatorForPFXToggle.configure(
+                text="Prefix Creator Mode: ACTIVE" if new_val else "Prefix Creator Mode: DISABLED", 
+                fg_color=c.SUCCESS if new_val else c.BG_INPUT
+            )
             if new_val:
-                self.e_prefix_btn.configure(command=self.open_editor_pfx_creator)
-                self.e_prefix_btn.configure(text="🛠️")
+                self.e_prefix_btn.configure(command=self.open_editor_pfx_creator, text="🛠️ Setup Prefix")
             else:
-                self.e_prefix_btn.configure(command=lambda: self.browse(self.e_prefix_lbl,False))
-                self.e_prefix_btn.configure(text="📁")
+                self.e_prefix_btn.configure(command=lambda: self.browse(self.e_prefix_lbl, False), text="📁 Browse Folder")
 
+        self.usePrefixCreatorForPFXToggle = ctk.CTkButton(
+            inner_left, text="Prefix Creator Mode: DISABLED", font=("Arial", 11, "bold"), height=34,
+            fg_color=c.BG_INPUT, text_color=c.TXT_MAIN, hover_color=c.ACCENT_HOVER, command=toggle_use_pfx_creator
+        )
+        self.usePrefixCreatorForPFXToggle.pack(fill="x", pady=(4, 8))
 
-        self.usePrefixCreatorForPFXToggle = ctk.CTkButton(scroll, text="Use Prefix creator for WINEPREFIX PATH: ❌", font=("Arial", 12),
-                                                fg_color=c.SUCCESS if self.usePrefixCreatorForPFX.get() else c.DANGER, hover_color=c.ACCENT_HOVER, command=toggle_use_pfx_creator)
-        self.usePrefixCreatorForPFXToggle.pack()
-
-        self.e_script_btn, self.e_script_lbl = self.create_setting_row(scroll, "Pre-launch Script Path", data['script'], True)
-        self.umu_id_lbl:ctk.CTkLabel = ctk.CTkLabel(scroll, text=data.get('GAMEID', "Not Set"), font=("Arial", 12), text_color=c.TXT_DIM)
-        self.umu_id_lbl.pack()
-        self.umu_id_btn = ctk.CTkButton(scroll, text="Get/Refresh GAMEID", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER,
-                                        command=lambda: self.get_umu_id_pressed(data['name'], data.get('store', 'none')))
-        self.umu_id_btn.pack()
-
-
-        # 3. Compatibility Layer (OptionMenu)
-        comp_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        comp_frame.pack(fill="x", padx=60, pady=15)
-        ctk.CTkLabel(comp_frame, text="COMPATIBILITY", font=("Arial", 11, "bold"), text_color=c.TXT_DIM).pack()
+        self.e_script_btn, self.e_script_lbl = self.create_setting_row(inner_left, "Pre-launch Script Path", data['script'], True)
         
-        self.e_proton = ctk.CTkOptionMenu(scroll, values=list(self.proton_paths.keys()), 
-                                        width=300, height=40, fg_color=c.BG_INPUT, 
-                                        button_color=c.BG_INPUT, dynamic_resizing=False)
-        self.e_proton.set(data.get('proton', "Default (UMU Internal)"))
-        self.e_proton.pack(pady=5)
+        # Minimalist spacer to keep lower block items distinct
+        ctk.CTkFrame(inner_left, height=6, fg_color="transparent").pack()
 
-        # 4. Gamescope (Simplified)
-        gs_container = ctk.CTkFrame(scroll, fg_color="transparent")
-        gs_container.pack(pady=20)
+        # System Identification Section Group
+        id_group = ctk.CTkFrame(inner_left, fg_color=c.BG_INPUT, height=38, corner_radius=6)
+        id_group.pack(fill="x", pady=(6, 0))
+        
+        self.umu_id_lbl = ctk.CTkLabel(id_group, text=f"UMU-ID: {data.get('GAMEID', 'Not Configured')}", font=("Consolas", 11), text_color=c.TXT_DIM)
+        self.umu_id_lbl.pack(side="left", padx=12, fill="y")
+        
+        self.umu_id_btn = ctk.CTkButton(
+            id_group, text="🔄 Refresh", width=80, height=26, fg_color=c.ACCENT, text_color=c.BG_MAIN, font=("Arial", 11, "bold"), hover_color=c.ACCENT_HOVER,
+            command=lambda: self.get_umu_id_pressed(data['name'], data.get('store', 'none'))
+        )
+        self.umu_id_btn.pack(side="right", padx=6, pady=6)
+
+        # ==========================================
+        # 3. RIGHT CARD: PERFORMANCE & RUNTIME
+        # ==========================================
+        perf_card = ctk.CTkFrame(layout_grid, fg_color=c.BG_PANEL, corner_radius=12, border_color=c.BG_FOCUS, border_width=1)
+        perf_card.grid(row=0, column=1, sticky="nsew", padx=(10, 0), pady=5)
+        
+        inner_right = ctk.CTkFrame(perf_card, fg_color="transparent")
+        inner_right.pack(fill="both", expand=True, padx=15, pady=12)
+        
+        ctk.CTkLabel(inner_right, text="PERFORMANCE", font=("Arial", 13, "bold"), text_color=c.ACCENT).pack(anchor="w", pady=(0, 8))
+
+        # Compatibility Engine Option Dropdown
+        ctk.CTkLabel(inner_right, text="Compatibility Layer", font=("Arial", 11, "bold"), text_color=c.TXT_DIM).pack(anchor="w", pady=(0, 2))
+        self.e_proton = ctk.CTkOptionMenu(
+            inner_right, values=list(self.proton_paths.keys()), 
+            height=36, fg_color=c.BG_INPUT, button_color=c.BG_FOCUS, dynamic_resizing=False, font=("Arial", 12)
+        )
+        self.e_proton.set(data.get('proton', "Default (UMU Internal)"))
+        self.e_proton.pack(fill="x", pady=(0, 10))
+
+        # Gamescope Sub-Panel Config Container
+        gs_box = ctk.CTkFrame(inner_right, fg_color=c.BG_INPUT, corner_radius=8)
+        gs_box.pack(fill="x", pady=(0, 8))
+
+        gs_inner = ctk.CTkFrame(gs_box, fg_color="transparent")
+        gs_inner.pack(fill="both", expand=True, padx=12, pady=12)
 
         self.gs_on_var = ctk.BooleanVar(value=data.get('gs_on', False))
         init_val = self.gs_on_var.get()
         self.gs_toggle_btn = ctk.CTkButton(
-            gs_container, 
-            text="GAMESCOPE: ENABLED" if init_val else "GAMESCOPE: DISABLED",
-            font=("Arial", 14, "bold"),
+            gs_inner, 
+            text="GAMESCOPE VIRTUAL DISPLAY: ENABLED" if init_val else "GAMESCOPE VIRTUAL DISPLAY: DISABLED",
+            font=("Arial", 11, "bold"),
             fg_color=c.SUCCESS if init_val else c.DANGER,
-            hover_color=c.ACCENT_HOVER,
-            height=45,
-            width=300,
-            corner_radius=20,
+            hover_color=c.ACCENT_HOVER, height=34,
             command=self.toggle_gamescope_ui,
             state="normal" if self.has_gamescope else "disabled"
         )
-        self.gs_toggle_btn.pack()
+        self.gs_toggle_btn.pack(fill="x", pady=(0, 8))
 
-        res_row = ctk.CTkFrame(gs_container, fg_color="transparent")
-        res_row.pack(pady=(0, 15))
+        res_row = ctk.CTkFrame(gs_inner, fg_color="transparent")
+        res_row.pack(anchor="w")
         
-        self.gs_w = ctk.CTkEntry(res_row, width=80, state="normal" if self.has_gamescope else "disabled" ,fg_color=c.BG_INPUT, justify="center")
+        ctk.CTkLabel(res_row, text="Target Resolution: ", font=("Arial", 11), text_color=c.TXT_MAIN).pack(side="left")
+        
+        self.gs_w = ctk.CTkEntry(res_row, width=65, height=26, state="normal" if self.has_gamescope else "disabled", fg_color=c.BG_PANEL, justify="center", font=("Consolas", 11))
         self.gs_w.insert(0, data.get('gs_w', "1280"))
-        self.gs_w.pack(side="left", padx=5)
+        self.gs_w.pack(side="left", padx=4)
         
-        # Add a "x" label between them for extra polish
-        ctk.CTkLabel(res_row, text="x", font=("Arial", 16)).pack(side="left", padx=5)
+        ctk.CTkLabel(res_row, text="x", font=("Arial", 12), text_color=c.TXT_DIM).pack(side="left", padx=2)
         
-        self.gs_h = ctk.CTkEntry(res_row, width=80, state="normal" if self.has_gamescope else "disabled" ,fg_color=c.BG_INPUT, justify="center")
+        self.gs_h = ctk.CTkEntry(res_row, width=65, height=26, state="normal" if self.has_gamescope else "disabled", fg_color=c.BG_PANEL, justify="center", font=("Consolas", 11))
         self.gs_h.insert(0, data.get('gs_h', "720"))
-        self.gs_h.pack(side="left", padx=5)
+        self.gs_h.pack(side="left", padx=4)
 
+        # MangoHud Metric Performance Overlay Button Switcher
         self.useMangoHud = ctk.BooleanVar(value=data.get('useMangoHud', False))
-        self.useMangoHudToggle = ctk.CTkButton(scroll, text="MangoHud: ON" if self.useMangoHud.get() else "MangoHud: OFF", font=("Arial", 12),
-                                                fg_color=c.SUCCESS if self.useMangoHud.get() else c.DANGER, hover_color=c.ACCENT_HOVER, command=self.toggle_mangohud)
-        self.useMangoHudToggle.pack()
+        self.useMangoHudToggle = ctk.CTkButton(
+            inner_right, text="MangoHud Performance Overlay: ON" if self.useMangoHud.get() else "MangoHud Performance Overlay: OFF", 
+            font=("Arial", 11, "bold"), height=34,
+            fg_color=c.SUCCESS if self.useMangoHud.get() else c.DANGER, hover_color=c.ACCENT_HOVER, command=self.toggle_mangohud
+        )
+        self.useMangoHudToggle.pack(fill="x", pady=(4, 0))
 
-        # Actions
-        act_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        act_frame.pack(pady=40)
+        # ==========================================
+        # 4. LOWER GLOBAL ACTIONS BAR (Sits safely on-screen)
+        # ==========================================
+        act_frame = ctk.CTkFrame(main_layout, fg_color="transparent")
+        act_frame.pack(pady=(15, 5))
         
-        ctk.CTkButton(act_frame, text="SAVE CHANGES", width=180, height=50, fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, command=self.save_game).pack(side="left", padx=10)
-        ctk.CTkButton(act_frame, text="DELETE", width=100, height=50, fg_color=c.DANGER, hover_color=c.DANGER_HOVER,command=lambda: self.spawn_controller_confirm_modal(self.delete_game)).pack(side="left", padx=10)
+        ctk.CTkButton(
+            act_frame, text="SAVE CHANGES (Y)", width=200, height=44, 
+            fg_color=c.SUCCESS, text_color=c.BG_MAIN, font=("Arial", 13, "bold"), 
+            hover_color=c.ACCENT_HOVER, command=self.save_game
+        ).pack(side="left", padx=10)
+        
+        ctk.CTkButton(
+            act_frame, text="DELETE GAME", width=130, height=44, 
+            fg_color=c.DANGER, text_color=c.TXT_MAIN, font=("Arial", 12, "bold"), 
+            hover_color=c.DANGER_HOVER, command=lambda: self.spawn_controller_confirm_modal(self.delete_game)
+        ).pack(side="left", padx=10)
 
+        # ==========================================
+        # 5. FIXED CONTROLLER NAVIGATION FOOTER
+        # ==========================================
         footer_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
-        footer_frame.pack(side="bottom", pady=10)
+        footer_frame.pack(side="bottom", pady=(0, 10))
 
-        # Create a small helper for footer items
-        def add_hint(hint_text,btn_hint):
-            lbl = ctk.CTkLabel(footer_frame, text=f"        {hint_text}        ",
-                               anchor='w',
-                               compound="left",
-                               font=("Arial", 12, "bold"), text_color=c.ACCENT)
+        def add_hint(hint_text, btn_hint):
+            lbl = ctk.CTkLabel(
+                footer_frame, text=f"        {hint_text}        ", 
+                anchor='w', compound="left", font=("Arial", 11, "bold"), text_color=c.ACCENT
+            )
             lbl.pack(side="left")
-            self.anchor_icon(btn_hint,lbl)
+            self.anchor_icon(btn_hint, lbl)
 
-        add_hint("SAVE CHANGES","Y")
-        add_hint("DISCARD","B")
-        add_hint("RESET","X")
+        add_hint("  SAVE CHANGES", "Y")
+        add_hint("  DISCARD", "B")
+        add_hint("  RESET", "X")
         
+        # Let the controller scanning system map the layout cleanly
         self.engine.rebuild_nav_map(priority_widget=self.e_exe_btn)
-        self.update_idletasks()     # FORCE the window to calculate widget positions NOW
-        self.after(50,self.update_controller_icons) # delay it a bit for smoother pop in
+        self.update_idletasks()
+        self.after(50, self.update_controller_icons)
 
     def toggle_gamescope_ui(self):
         """Switches the Gamescope state and updates the UI button immediately."""
@@ -634,7 +707,7 @@ class UmuLauncher(ctk.CTk):
         
         # 2. Update the button look
         new_val = self.gs_on_var.get()
-        status_text = "GAMESCOPE: ENABLED" if new_val else "GAMESCOPE: DISABLED"
+        status_text = "GAMESCOPE VIRTUAL DISPLAY: ENABLED" if new_val else "GAMESCOPE VIRTUAL DISPLAY: DISABLED"
         status_color = c.SUCCESS if new_val else c.DANGER # Dim gray when off
         
         self.gs_toggle_btn.configure(text=status_text, fg_color=status_color)
@@ -648,48 +721,53 @@ class UmuLauncher(ctk.CTk):
         current_val = self.useMangoHud.get()
         self.useMangoHud.set(not current_val)
         new_val = self.useMangoHud.get()
-        self.useMangoHudToggle.configure(text="MangoHud: ON" if new_val else "MangoHud: OFF", fg_color=c.SUCCESS if new_val else c.DANGER)
+        self.useMangoHudToggle.configure(text="MangoHud Performance Overlay: ON" if new_val else "MangoHud Performance Overlay: OFF", fg_color=c.SUCCESS if new_val else c.DANGER)
 
     def editor_clear_label(self,target:ctk.CTkLabel):
         target.configure(text="")
 
     def create_setting_row(self, parent, label_text, value, is_file=True) -> tuple[ctk.CTkButton , ctk.CTkLabel]:
-        """Creates a clean, transparent row that the controller can highlight as a whole."""
-        # 1. Outer container for spacing
+        """Creates a tight, high-density setting card optimized for 800p console views."""
+        # Clean fallback text if empty
+        display_text = value if value else ""
+
+        # 1. Outer container (Reduced paddings dramatically to save screen real estate)
         wrapper = ctk.CTkFrame(parent, fg_color="transparent")
-        wrapper.pack(fill="x", padx=60, pady=10)
+        wrapper.pack(fill="x", padx=10, pady=4)
 
-        # 2. Header Label (The 'Small Caps' style)
+        # 2. Header Label
         ctk.CTkLabel(wrapper, text=label_text.upper(), 
-                    font=("Arial", 10, "bold"), text_color=c.TXT_DIM).pack(pady=(0, 2))
+                    font=("Arial", 10, "bold"), text_color=c.TXT_DIM).pack(anchor="w", pady=(0, 2))
 
-        # 3. The Interactive Card
-        # We use a Frame so we can pack multiple things inside it without 'grid' conflicts
-        card = ctk.CTkFrame(wrapper, fg_color=c.BG_MAIN, height=45, corner_radius=8)
+        # 3. Interactive Card (Tightened down to a sleek 38px profile)
+        card = ctk.CTkFrame(wrapper, fg_color=c.BG_MAIN, height=38, corner_radius=6)
         card.pack(fill="x")
-        card.pack_propagate(False) # Keep fixed height
+        card.pack_propagate(False) 
 
-        # 4. Content inside the card
-        path_label = ctk.CTkLabel(card, text=value, font=("Arial", 13), 
-                                fg_color="transparent", anchor="n")
-        path_label.pack(side="left", padx=15, fill="x", expand=True)
+        # 4. Content inside the card (Using anchor="w" to cleanly clip long Linux paths)
+        path_label = ctk.CTkLabel(card, text=display_text, font=("Arial", 12), 
+                                fg_color="transparent", anchor="w")
+        path_label.pack(side="left", padx=12, fill="both", expand=True)
 
-        icon = "📄" if is_file else "📁"
-        ctk.CTkButton(card, text="❌", font=("Arial", 14),command=lambda: self.editor_clear_label(path_label),
-                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n",width=5).pack(side="right", padx=15)
-        btn = ctk.CTkButton(card, text=icon, font=("Arial", 14),command=lambda: self.browse(path_label, is_file),
-                    fg_color="transparent",hover_color=c.ACCENT_HOVER,anchor="n",width=5)
-        btn.pack(side="right", padx=15)
+        # 5. Fixed Width Control Buttons (Uniform width handles controller focus maps beautifully)
+        icon = "📄 Browse Executable" if is_file else "📁 Browse Folder"
         
-        # 5. Controller/Mouse Binding
-        # We bind the click to the frame AND the labels inside it
+        # Clear Button
+        ctk.CTkButton(card, text="❌ Clear", font=("Arial", 12), command=lambda: self.editor_clear_label(path_label),
+                    fg_color="transparent", hover_color=c.DANGER_HOVER, width=32, height=38).pack(side="right", padx=2)
+        
+        # Browse Button (Returned directly for your priority navigation hook)
+        btn = ctk.CTkButton(card, text=icon, font=("Arial", 12), command=lambda: self.browse(path_label, is_file),
+                    fg_color="transparent", hover_color=c.ACCENT_HOVER, width=32, height=38)
+        btn.pack(side="right", padx=2)
+        
+        # 6. Click Fallbacks
         def on_click(event=None):
             self.browse(path_label, is_file)
 
         card.bind("<Button-1>", on_click)
         path_label.bind("<Button-1>", on_click)
         
-        #return card, path_label
         return btn, path_label
     
     def browse(self, entry, is_file):
@@ -735,7 +813,7 @@ class UmuLauncher(ctk.CTk):
 
     def spawn_controller_confirm_modal(self,func):
         current_view_state = self.view_state
-        self.view_state = "confirm_modal"
+        self.view_state = "modal"
 
         def on_user_decision(confirmed: bool):
             """This function runs ONLY after the user clicks a button"""
@@ -1227,7 +1305,8 @@ class UmuLauncher(ctk.CTk):
                     # 3. POSITION REFINEMENT
                     # Adjust these numbers to "nudge" the icons
                     # Current: Inside the left edge (x+5), Vertically Centered
-                    target_x = wx + 8  
+                    offset_from_target = 5
+                    target_x = wx + offset_from_target
                     target_y = wy + (wh // 2) - (ih // 2)
 
                     # 4. Handle Special Cases (like the Exit Button)
