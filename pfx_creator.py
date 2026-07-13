@@ -6,13 +6,16 @@ import os
 import colors as c
 
 class PrefixCreator(ctk.CTkFrame):
-    def __init__(self, master,browser_callback=None,on_finish_callback=None, **kwargs):
+    def __init__(self, master,browser_callback=None,on_finish_callback=None,on_close_callback=None, **kwargs):
         # Forward master and any styling overrides down to the Frame initialization
         super().__init__(master, fg_color=c.BG_MAIN, **kwargs)
 
         self.browser_callback = browser_callback
         self.on_finish_callback = on_finish_callback
         self.master=master
+        self.on_close_callback = on_close_callback
+        if on_close_callback: #that means we are running on a modal/seperate window
+            self.master.protocol("WM_DELETE_WINDOW", self.on_close)
 
 
         # Variables (scoped safely to this frame component)
@@ -219,6 +222,10 @@ class PrefixCreator(ctk.CTkFrame):
 
     def finish_on_editor(self):
         self.on_finish_callback(self.entry_path_lbl.cget('text'))
+        self.master.withdraw()
+    
+    def on_close(self):
+        self.on_close_callback()
         self.master.withdraw()
 
 # Isolated debugging profile

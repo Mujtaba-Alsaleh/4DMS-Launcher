@@ -18,25 +18,32 @@ class ControllerConfirmModal(ctk.CTkToplevel):
 
         # UI Setup
         self.title("Confirm action")
-        self.geometry("780x130")
+        self.geometry("1365x335")
         self.attributes('-topmost', True)
 
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         txt = "Do you want to confirm the action?" if not msg else msg
-        ctk.CTkLabel(self,text=txt).pack(side="left",pady=0,padx=20)
+        content_frame = ctk.CTkFrame(self, fg_color="transparent")
+        content_frame.pack(expand=True, fill="both", padx=20, pady=20)
 
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.pack(padx=10, pady=(0, 15))
+        ctk.CTkLabel(content_frame,text=txt,
+            width=330,
+            anchor="center",
+            justify="left",
+            wraplength=1200
+        ).pack(pady=(0, 20))
 
-        self.confirm = ctk.CTkButton(header,text="Confirm",
-            fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER, height=40, font=("Arial", 13, "bold"),
-            command=lambda: self.finish()).pack(side="left", padx=5)
-        rightheader = ctk.CTkFrame(self, fg_color="transparent")
-        rightheader.pack(padx=10, pady=(0, 15))
+        self.confirm = ctk.CTkButton(content_frame,text="Confirm",
+            fg_color=c.SUCCESS,hover_color=c.ACCENT_HOVER,
+            height=40, 
+            font=("Arial", 13, "bold"),
+            command=lambda: self.finish())
+        self.confirm.pack(side="left", padx=10)
 
-        self.cancel = ctk.CTkButton(rightheader, text="Cancel", fg_color=c.DANGER,hover_color=c.DANGER_HOVER, width=100, height=40,
-            command=self.cancel).pack(side="right", padx=5)
+        self.cancelbtn = ctk.CTkButton(content_frame, text="Cancel", fg_color=c.DANGER,hover_color=c.DANGER_HOVER, width=100, height=40,
+            command=self.cancel)
+        self.cancelbtn.pack(side="left", padx=10)
 
         self.update_idletasks()
         self.engine.rebuild_nav_map_modal(self)

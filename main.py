@@ -487,10 +487,14 @@ class UmuLauncher(ctk.CTk):
     def open_editor_pfx_creator(self):
         def on_finish(new_val):
             self.e_prefix_lbl.configure(text=new_val)
+            self.engine.rebuild_nav_map()
+        def on_close():
+            self.engine.rebuild_nav_map()
 
         win = self.spawn_toplevel(self,"PFX Creator")
-        frame = PrefixCreator(master=win,browser_callback=self.browse,on_finish_callback=on_finish)
+        frame = PrefixCreator(master=win,browser_callback=self.browse,on_finish_callback=on_finish,on_close_callback=on_close)
         frame.pack(fill="both", expand=True)
+        self.engine.rebuild_nav_map_modal(frame)
 
     def show_editor(self):
         self.check_dependencies() # Refresh check

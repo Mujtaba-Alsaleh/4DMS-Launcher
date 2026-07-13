@@ -153,7 +153,7 @@ class ControllerFileBrowser(ctk.CTkToplevel):
             print("User cancelled.")
 
     def ask_directory_creation(self):
-        modal = ControllerConfirmModal(self, engine=self.engine,on_result=self.on_user_decision,msg=f"create new folder at {os.path.join(self.current_path,"pfx")}?")
+        modal = ControllerConfirmModal(self, engine=self.engine,on_result=self.on_user_decision,msg=f"create new folder at\n {os.path.join(self.current_path,"pfx")}?")
 
     def scroll_to_selected(self, selected_index):
         """Accurate scrolling by comparing screen coordinates."""
