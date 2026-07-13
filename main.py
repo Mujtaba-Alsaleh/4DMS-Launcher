@@ -391,7 +391,7 @@ class UmuLauncher(ctk.CTk):
             ctk.CTkLabel(self.content_container, image=ctk_img, text="").pack(pady=(20, 0))
         else:
             # Placeholder if no art exists
-            ctk.CTkFrame(self.content_container, width=225, height=400, 
+            ctk.CTkFrame(self.content_container, width=225, height=400,
                          fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(padx=20,pady=20)
 
         ctk.CTkLabel(self.content_container, text=data['name'], 
@@ -414,7 +414,7 @@ class UmuLauncher(ctk.CTk):
             play_btn_color="#444444"
 
         self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
-                                compound="left", width=220, height=70,anchor='center',
+                                compound="left", width=180, height=70,anchor='center',
                                 state=play_btn_state, 
                                 fg_color=play_btn_color, 
                                 hover_color=c.ACCENT_HOVER,
