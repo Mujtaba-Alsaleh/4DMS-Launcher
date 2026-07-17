@@ -9,6 +9,7 @@ from editable_title import EditableTitle
 import colors as c
 from pfx_creator import PrefixCreator
 from controller_confirm_modal import ControllerConfirmModal
+from artworkImage import GameImage
 import time
 from PIL import Image
 import shutil
@@ -58,6 +59,7 @@ class UmuLauncher(ctk.CTk):
         self.check_dependencies()
         self.ensure_data_file()
         self.load_umu_database()
+        self.runningOnGamescope=False
         # Window Setup
         self.title("4DMS Launcher")
 
@@ -66,6 +68,7 @@ class UmuLauncher(ctk.CTk):
             h = self.winfo_screenheight()
             self.geometry(f"{w}x{h}+0+0")
             self.overrideredirect(True) #Remove window decorations
+            self.runningOnGamescope=True
         else:
             # Default windowed size
             self.geometry("1920x1200")
@@ -385,17 +388,20 @@ class UmuLauncher(ctk.CTk):
 
         # Display Artwork
         art_path = data.get("art")
-        ctk_img = self.get_art_image(art_path)
+        h = 240
+        w = 180
+        #ctk_img = self.get_art_image(art_path, size=(w,h))
+        ctk_img = os.path.exists(art_path) if art_path else False
         
         if ctk_img:
-            ctk.CTkLabel(self.content_container, image=ctk_img, text="").pack(pady=(20, 0))
+            GameImage(self.content_container,file_path=art_path,width=w,height=h).pack(pady=(20, 0))
         else:
             # Placeholder if no art exists
-            ctk.CTkFrame(self.content_container, width=225, height=400,
-                         fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(padx=20,pady=20)
+            ctk.CTkFrame(self.content_container, width=w, height=h,
+                         fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(padx=20,pady=5)
 
         ctk.CTkLabel(self.content_container, text=data['name'], 
-                     font=("Arial", 48, "bold"), text_color=c.TXT_MAIN).pack(pady=(20, 10))
+                     font=("Arial", 22, "bold"), text_color=c.TXT_MAIN).pack(pady=(20, 10))
         
         btn_frame = ctk.CTkFrame(self.content_container, fg_color="transparent")
         btn_frame.pack(pady=20)
@@ -414,38 +420,47 @@ class UmuLauncher(ctk.CTk):
             play_btn_color="#444444"
 
         self.play_btn = ctk.CTkButton(btn_frame, text=play_btn_text, 
-                                compound="left", width=180, height=70,anchor='center',
+                                compound="left", width=180, height=40,anchor='center',
                                 state=play_btn_state, 
                                 fg_color=play_btn_color, 
                                 hover_color=c.ACCENT_HOVER,
-                                font=("Arial", 22, "bold"),
+                                font=("Arial", 16, "bold"),
                                 command=self.try_launch_game)
-        self.play_btn.pack(side="left", padx=15)
+        self.play_btn.pack(side="left", padx=15,pady=5)
 
 
         edit_btn = ctk.CTkButton(btn_frame, text="SETTINGS",anchor='center',
-                                compound="left", width=140, height=70, 
+                                compound="left", width=140, height=40,
                                 fg_color=c.BG_INPUT,
                                 hover_color=c.ACCENT_HOVER,
                                 command=self.show_editor)
-        edit_btn.pack(side="left", padx=15)
+        edit_btn.pack(side="left", padx=15,pady=5)
 
-        self.art_btn = ctk.CTkButton(self.content_container, text=" SET ARTWORK",anchor='center',
-                                     compound="left", width=140, height=70,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,hover_color=c.ACCENT_HOVER,
+        self.art_btn = ctk.CTkButton(self.content_container, text=" SET ARTWORK",anchor='center', font=("Arial", 11, "bold"),
+                                     compound="left", width=140, height=40,fg_color=c.BG_INPUT, text_color=c.TXT_DIM,hover_color=c.ACCENT_HOVER,
                                      command=self.browse_artwork)
-        self.art_btn.pack(pady=10)
+        self.art_btn.pack(pady=5)
 
         if ctk_img: # that mean image exist
-            rm_art_btn = ctk.CTkButton(self.content_container, text="   REMOVE ARTWORK",anchor='center',
+            rm_art_btn = ctk.CTkButton(self.content_container, text="   REMOVE ARTWORK",anchor='center', font=("Arial", 16, "bold"),
                                      compound="left", width=20, height=20,fg_color=c.DANGER,hover_color=c.DANGER_HOVER, text_color=c.TXT_DIM,
                                      command=self.remove_artwork)
-            rm_art_btn.pack(padx=10)
+            rm_art_btn.pack(padx=5)
 
         self.anchor_icon("menu",self.play_btn)
         self.anchor_icon("X",edit_btn)
         self.anchor_icon("Y",self.art_btn)
 
-        self.create_info_panel(self.content_container, data)
+
+        self.info_border_frame = ctk.CTkFrame(
+        self.content_container,
+        fg_color="transparent",  # Keep background transparent if you want underlying color
+        border_width=2,          # Thickness of the border
+        border_color=c.BG_INPUT  # Color of the border (ensure this color is visible)
+        )
+        self.info_border_frame.pack(fill="x", padx=20, pady=10)
+
+        self.create_info_panel(self.info_border_frame, data)
         
         self.engine.rebuild_nav_map(priority_widget=self.play_btn)
         self.update_idletasks()     # FORCE the window to calculate widget positions NOW
@@ -453,7 +468,7 @@ class UmuLauncher(ctk.CTk):
 
     def create_info_panel(self, parent, data):
         info_container = ctk.CTkFrame(parent, fg_color="transparent")
-        info_container.pack(fill="x", padx=20, pady=10)
+        info_container.pack(fill="x", padx=20, pady=3)
 
         # Helper to add rows
         def add_row(label, value, val_color=c.TXT_MAIN):
@@ -811,7 +826,7 @@ class UmuLauncher(ctk.CTk):
         self.refresh_sidebar()
         self.show_welcome()
 
-    def spawn_controller_confirm_modal(self,func):
+    def spawn_controller_confirm_modal(self,func=None,msg=None):
         current_view_state = self.view_state
         self.view_state = "modal"
 
@@ -820,7 +835,8 @@ class UmuLauncher(ctk.CTk):
             print("on_user_decision")
             if confirmed:
                 print("User confirmed! Proceeding with logic...")
-                func()
+                if func:
+                    func()
             else:
                 print("User cancelled.")
 
@@ -828,7 +844,7 @@ class UmuLauncher(ctk.CTk):
             self.engine.rebuild_nav_map()
 
         # Create modal (Non-blocking)
-        modal = ControllerConfirmModal(self, engine=self.engine,on_result=on_user_decision)
+        modal = ControllerConfirmModal(self, engine=self.engine,on_result=on_user_decision,msg=msg)
 
     def try_launch_game(self):
         if getattr(self, "launch_lock", True):
@@ -845,6 +861,10 @@ class UmuLauncher(ctk.CTk):
         p_path = self.proton_paths.get(proton, "")
         if not p_path:  
             self.play_btn.configure(text="Non-valid Proton version selected\nPlease change it in the game settings", fg_color=c.DANGER)
+            return
+
+        if self.runningOnGamescope and d.get('gs_on'):
+            self.spawn_controller_confirm_modal(msg="[4DMS Warn] we are running under gamescope already. please disable gamescope option first")
             return
         # 1. Lock the UI
         self.is_playing = True
@@ -933,19 +953,18 @@ class UmuLauncher(ctk.CTk):
                     # Heroic disables winemenubuilder to prevent explorer.exe crashes
                     "WINEDLLOVERRIDES": "winemenubuilder.exe=d"
             }
-            
 
 
             # 2. Command Construction
             cmd = []
             cmd.extend([d.get('script')]) if d.get('script') else None
 
-            if d.get('gs_on') and self.has_gamescope:
+            if d.get('gs_on') and self.has_gamescope and not self.runningOnGamescope:
                 cmd.extend([
                     "gamescope", "-w", str(d.get('gs_w', "1280")), 
                     "-h", str(d.get('gs_h', "720")), "-f", "--"
                 ])
-            
+
             # We still use umu-run but with our manual env vars to force the handshake
             cmd.extend(["umu-run", d['exe']])
 
