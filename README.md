@@ -90,4 +90,4 @@ python -m nuitka --onefile \
 
 ## License
 
-MIT
+GPL-3.0 license
