@@ -9,6 +9,15 @@ class GameImage(ctk.CTkCanvas):
     Hardened against RAM leaks and destruction conflicts without breaking Tkinter internals.
     """
     def __init__(self, master, file_path, width=250, height=350, quality=45, **kwargs):
+        bg = "#2B2B2B"
+        if "bg" not in kwargs:
+            try:
+                val = master.cget("fg_color")
+                if val and val != "transparent":
+                    bg = val
+            except Exception:
+                pass
+        kwargs.setdefault("bg", bg)
         super().__init__(
             master,
             width=width,
@@ -31,14 +40,13 @@ class GameImage(ctk.CTkCanvas):
         self._current_photo = None
         self._loop_id = None
         self._img_stream = None
+        self._img_stream = None
 
         # Bind the destruction handle
         self.bind("<Destroy>", self._on_destroy)
 
         if not os.path.exists(self.optimized_path):
             self.after(10, self._compress_asset)
-        else:
-            self.start()
 
     def _compress_asset(self):
         try:
@@ -55,7 +63,7 @@ class GameImage(ctk.CTkCanvas):
                         durations.append(frame.info.get('duration', 100) * 2)
 
                 if frames:
-                    frames.save(
+                    frames[0].save(
                         self.optimized_path,
                         save_all=True,
                         append_images=frames[1:],
@@ -73,11 +81,23 @@ class GameImage(ctk.CTkCanvas):
         if not self.is_playing and os.path.exists(self.optimized_path):
             self.is_playing = True
             try:
+                self._resize_to_parent()
                 self._img_stream = Image.open(self.optimized_path)
                 self._frame_idx = 0
                 self._animate_next_frame()
             except Exception as e:
                 print(f"Failed to start streaming context: {e}")
+
+    def _resize_to_parent(self):
+        try:
+            pw = self.master.winfo_width()
+            ph = self.master.winfo_height()
+            if pw > 1 and ph > 1:
+                self.width = pw
+                self.height = ph
+                self.configure(width=pw, height=ph)
+        except Exception:
+            pass
 
     def _animate_next_frame(self):
         if not self.is_playing or not self.winfo_exists():
@@ -89,6 +109,8 @@ class GameImage(ctk.CTkCanvas):
             duration = self._img_stream.info.get('duration', 100)
 
             frame = self._img_stream.copy()
+            if frame.size != (self.width, self.height):
+                frame = frame.resize((self.width, self.height), Image.Resampling.BILINEAR)
             photo = ImageTk.PhotoImage(frame)
 
             self._draw_frame(photo)
@@ -123,14 +145,14 @@ class GameImage(ctk.CTkCanvas):
         """Forcefully breaks loop binds and breaks memory hooks clean."""
         self.is_playing = False
 
-        if self._loop_id is not None:
+        if getattr(self, '_loop_id', None) is not None:
             try:
                 self.after_cancel(self._loop_id)
             except Exception:
                 pass
             self._loop_id = None
 
-        if self._img_stream is not None:
+        if getattr(self, '_img_stream', None) is not None:
             try:
                 self._img_stream.close()
             except Exception:
@@ -150,6 +172,12 @@ class GameImage(ctk.CTkCanvas):
         """Intercepts CustomTkinter internal component manual code-destructions."""
         self.stop()
         super().destroy()
+
+    def lift_widget(self):
+        self.tk.call('raise', self._w)
+
+    def lower_widget(self):
+        self.tk.call('lower', self._w)
 
     def _on_destroy(self, event):
         """Fires when Tkinter framework tears away layout slots."""

@@ -1,20 +1,11 @@
 import pygame
 import os
 import time
+import subprocess
 import customtkinter as ctk
 import colors as c
 from controller_file_browser import ControllerFileBrowser
-import sys
-
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
+from launcher.utils import resource_path
 
 class UmuInputEngine:
     def __init__(self, app):
@@ -27,12 +18,18 @@ class UmuInputEngine:
         self.current_file_browser:ControllerFileBrowser=None
         self.in_file_browser=False
         self.on_screen_keyboard_open=False
+        self._lib_prev_btn=None
+        self._prev_view_state=None
         
         self.app.bind("<Any-KeyPress>", lambda e: self.keyboardEvents())
         self.app.bind("<Button-1>", lambda e: self.keyboardEvents())
 
         self.quit_hold_start=0
         self.quit_duration=2
+        self.fast_scroll_active = False
+        self.rb_hold_start = 0
+        self.rb_hold_duration = 0.5
+        self._controller_detected_at = 0
         self.sound = SoundManager()
         self.sound.play_at_vol("launch",0.15) # play launch as a welcome app sound
 
@@ -50,6 +47,7 @@ class UmuInputEngine:
                 j.init()
                 self.joysticks.append(j)
                 print(f"Detected Input Device: {j.get_name()}")
+            self._controller_detected_at = time.time()
 
     def rebuild_nav_map(self, priority_widget=None):
         self.nav_list = []
@@ -171,46 +169,103 @@ class UmuInputEngine:
             target.focus_set()
             target.select_range(0, 'end')
             target.icursor('end')
+            if not self.on_screen_keyboard_open:
+                self.on_screen_keyboard_open = True
+                self.trigger_virtual_keyboard(show=True)
+        elif self.on_screen_keyboard_open:
+            self.on_screen_keyboard_open = False
+            self.trigger_virtual_keyboard(show=False)
 
     def sync_visuals(self):
         """Standardizes visuals using colors.py constants."""
         if not self.nav_list: return
-        
+
+        target = self.nav_list[self.nav_index]
+
+        if self.app.view_state == "library":
+            prev = getattr(self, '_lib_prev_btn', None)
+            if prev and prev != target and hasattr(prev, 'winfo_exists') and prev.winfo_exists():
+                try:
+                    if hasattr(self.app, 'current_view') and hasattr(self.app.current_view, '_stop_cover_anim'):
+                        self.app.current_view._stop_cover_anim(prev)
+                    elif hasattr(prev, 'game_image') and prev.game_image:
+                        prev.game_image.stop()
+                        prev.game_image.lower_widget()
+                    else:
+                        prev.configure(border_width=0, fg_color=c.BG_INPUT)
+                except Exception:
+                    pass
+            if hasattr(self.app, 'current_view') and hasattr(self.app.current_view, '_start_cover_anim'):
+                try:
+                    self.app.current_view._start_cover_anim(target)
+                except Exception:
+                    pass
+            self._lib_prev_btn = target
+        elif self._prev_view_state == "library":
+            prev = getattr(self, '_lib_prev_btn', None)
+            if prev and hasattr(prev, 'winfo_exists') and prev.winfo_exists():
+                try:
+                    if hasattr(self.app, 'current_view') and hasattr(self.app.current_view, '_stop_cover_anim'):
+                        self.app.current_view._stop_cover_anim(prev)
+                    elif hasattr(prev, 'game_image') and prev.game_image:
+                        prev.game_image.stop()
+                        prev.game_image.lower_widget()
+                except Exception:
+                    pass
+            self._lib_prev_btn = None
+        self._prev_view_state = self.app.view_state
+
         for w in self.nav_list:
             try:
-                if hasattr(w, 'configure'):
-                    # Dropdowns and Checkboxes use BG_INPUT (from colors.py)
-                    if isinstance(w, (ctk.CTkOptionMenu, ctk.CTkCheckBox)):
+                if not hasattr(w, 'configure'):
+                    continue
+
+                is_target = (w == target)
+
+                if isinstance(w, (ctk.CTkOptionMenu, ctk.CTkCheckBox)):
+                    if not is_target:
                         w.configure(fg_color=c.BG_INPUT)
-                        if isinstance(w, ctk.CTkOptionMenu):
-                            w.configure(button_color=c.BG_INPUT)
-                    else:
+                    if isinstance(w, ctk.CTkOptionMenu) and not is_target:
+                        w.configure(button_color=c.BG_INPUT)
+                elif isinstance(w, ctk.CTkButton):
+                    orig_fg = w.cget("fg_color")
+                    is_toggle = (orig_fg in (c.SUCCESS, c.DANGER))
+                    is_poster = hasattr(w, 'game_image')
+                    if is_target:
+                        if not is_poster:
+                            active_bg = c.get_dimmed_accent(c.ACCENT, factor=0.3)
+                            try:
+                                w.configure(border_width=3, border_color=c.ACCENT, fg_color=active_bg, hover_color=c.ACCENT_HOVER)
+                            except TypeError:
+                                w.configure(border_width=3, border_color=c.ACCENT, fg_color=active_bg)
+                    elif is_toggle:
+                        pass
+                    elif not is_poster:
+                        w.configure(border_width=0, fg_color=c.BG_INPUT)
+                else:
+                    if not is_target:
                         w.configure(border_width=0)
             except: pass
-            
-        target = self.nav_list[self.nav_index]
-        if target and hasattr(target,"focus_set()"):
-            target.focus_set()
-        
-        try:
-            # Highlight with the ACCENT color
-            if not isinstance(target, ctk.CTkOptionMenu):
-                target.configure(border_width=2, border_color=c.ACCENT)
-            
-            # Special color for focused interactive widgets
-            if isinstance(target, (ctk.CTkOptionMenu, ctk.CTkCheckBox)):
+
+        if target and hasattr(target, "focus_set"):
+            try:
+                target.focus_set()
+            except (AttributeError, TypeError):
+                pass
+
+        if isinstance(target, (ctk.CTkOptionMenu, ctk.CTkCheckBox)):
+            try:
                 target.configure(fg_color=c.BG_FOCUS)
                 if isinstance(target, ctk.CTkOptionMenu):
                     target.configure(button_color=c.BG_FOCUS)
-                 
-        except Exception as e:
-            print(f"Visual sync error: {e}")
-        
-        #BOBING Animation
-        # Get the currently focused widget from nav_list
+            except: pass
+
+        try:
+            if not isinstance(target, ctk.CTkOptionMenu) and not hasattr(target, 'game_image'):
+                target.configure(border_width=2, border_color=c.ACCENT)
+        except: pass
+
         current_widget = self.nav_list[self.nav_index]
-        
-        # Find which icon is anchored to this widget
         for key, anchor_widget in self.app.icon_anchors.items():
             if anchor_widget == current_widget:
                 self.bounce_icon(self.app.icon_labels[key])
@@ -218,12 +273,9 @@ class UmuInputEngine:
         if self.current_file_browser and self.in_file_browser:
             self.current_file_browser.scroll_to_selected(selected_index=self.nav_index)
 
-        
-        # HIGHLIGHT
         active_bg = c.get_dimmed_accent(c.ACCENT, factor=0.3)
         for i, widget in enumerate(self.nav_list):
             if i == self.nav_index:
-                # Type-safe check: OptionMenu needs special handling
                 if isinstance(widget, ctk.CTkOptionMenu):
                     widget.configure(
                         dropdown_fg_color=active_bg,
@@ -231,31 +283,9 @@ class UmuInputEngine:
                         button_color=active_bg,
                         button_hover_color=active_bg
                     )
-                else:
-                    try: # Try applying hover_color if not valid do it with out it
-                        # Regular Buttons (Posters)
-                        widget.configure(
-                            border_width=3, 
-                            border_color=c.ACCENT, 
-                            fg_color=active_bg,
-                            hover_color=c.ACCENT_HOVER
-                        )
-                    except:
-                        # Regular Buttons (Posters)
-                        widget.configure(
-                            border_width=3, 
-                            border_color=c.ACCENT, 
-                            fg_color=active_bg 
-                        )
             else:
-                # Reset inactive widgets
                 if isinstance(widget, ctk.CTkOptionMenu):
                     widget.configure(dropdown_fg_color=c.BG_INPUT)
-                else:
-                    widget.configure(
-                        border_width=0, 
-                        fg_color=c.BG_INPUT
-                    )
 
     def bounce_icon(self, icon_label):
         """Quickly pops the icon up and drops it back."""
@@ -275,8 +305,8 @@ class UmuInputEngine:
         except Exception:
             return
 
-        self.refresh_hardware()
         pygame.event.pump()
+        self.refresh_hardware()
         
         now = time.time()
         # Tracking state for this specific frame across ALL controllers
@@ -286,8 +316,9 @@ class UmuInputEngine:
                 
         if self.on_screen_keyboard_open: 
             for joy in self.joysticks:
-                if joy.get_button(1): # Button B to check if keyboard is closed
+                if joy.get_button(1): # Button B to close the on-screen keyboard
                     self.on_screen_keyboard_open = False
+                    self.trigger_virtual_keyboard(show=False)
                     self.last_input = time.time()
                     break
             return
@@ -298,6 +329,10 @@ class UmuInputEngine:
                 # Check the "View" button (6) specifically for the Quit Timer
                 if joy.get_button(6):
                     any_view_button_held = True
+
+                # Skip button presses for 0.5s after controller detection to avoid phantom presses
+                if self._controller_detected_at > 0 and (now - self._controller_detected_at) < 0.5:
+                    return
 
                 # --- PHASE 2: TAP ACTIONS (Only if no cooldown) ---
                 if not cooldown_active:
@@ -312,10 +347,33 @@ class UmuInputEngine:
                         self.trigger_input(self.app.handle_back)
                         self.sound.play("back")
                         return
-                    
-                    # Button X (2) - Editor
+
+                    # LB (4) / RB (5) - Library sort/filter or volume overlay
+                    elif joy.get_button(4):
+                        if self.app.view_state == "library":
+                            self.trigger_input(self.app.current_view.cycle_sort)
+                            self.sound.play("confirm")
+                        return
+                    elif joy.get_button(5):
+                        if self.app.view_state == "library":
+                            self.trigger_input(self.app.current_view.cycle_filter)
+                            self.sound.play("confirm")
+                        elif self.rb_hold_start == 0:
+                            self.rb_hold_start = now
+                        elif (now - self.rb_hold_start) >= self.rb_hold_duration:
+                            self.app.volume_overlay.toggle()
+                            self.rb_hold_start = 0
+                        return
+                    elif self.rb_hold_start > 0:
+                        self.rb_hold_start = 0
+
+                    # Button X (2) - Editor or Dashboard
                     elif joy.get_button(2): 
-                        self.trigger_input(lambda: self.app.show_editor() if self.app.current_game_id else None)
+                        if self.app.view_state == "library" and self.app.current_game_id:
+                            g_id = self.app.current_game_id
+                            self.trigger_input(lambda gid=g_id: self.app.show_dashboard(gid))
+                        else:
+                            self.trigger_input(lambda: self.app.show_editor() if self.app.current_game_id else None)
                         self.sound.play("confirm")
                         return
                     
@@ -326,6 +384,9 @@ class UmuInputEngine:
                             self.sound.play("confirm")
                         elif self.app.view_state == "dashboard":
                             self.trigger_input(self.app.browse_artwork)
+                        elif self.app.view_state == "library":
+                            self.trigger_input(self.app.current_view.toggle_favorite)
+                            self.sound.play("confirm")
                         return
 
                     # Button Start (7) - Launch
@@ -333,6 +394,17 @@ class UmuInputEngine:
                         self.trigger_input(lambda: self.app.try_launch_game() if self.app.current_game_id else None)
                         if self.app.current_game_id:
                             self.sound.play("launch")
+                        return
+
+                    # Button Menu (8) - Toggle sidebar focus
+                    elif joy.get_button(8):
+                        self.trigger_input(self._toggle_sidebar)
+                        self.sound.play("confirm")
+                        return
+
+                    # Button R3 (9) - Toggle fast scroll in library
+                    elif joy.get_button(9):
+                        self.trigger_input(lambda: setattr(self, 'fast_scroll_active', not self.fast_scroll_active))
                         return
 
                     # --- PHASE 3: NAVIGATION (D-Pad & Left Stick) ---
@@ -346,6 +418,20 @@ class UmuInputEngine:
                         move_x = 1 if joy.get_axis(0) > 0 else -1
                     if move_y == 0 and abs(joy.get_axis(1)) > 0.6:
                         move_y = 1 if joy.get_axis(1) > 0 else -1
+
+                    # Volume adjustment via Right Stick or D-Pad when overlay visible
+                    if self.app.volume_overlay.visible:
+                        rstick_x = joy.get_axis(3)
+                        if abs(rstick_x) > 0.5:
+                            delta = 5 if rstick_x > 0 else -5
+                            self.app.volume_overlay.adjust(delta)
+                            self.last_input = now
+                            return
+                        if move_x != 0:
+                            delta = 5 if move_x > 0 else -5
+                            self.app.volume_overlay.adjust(delta)
+                            self.last_input = now
+                            return
 
                     if move_x != 0 or move_y != 0:
                         self.last_input = now
@@ -390,18 +476,48 @@ class UmuInputEngine:
                         elif self.app.view_state == "library":
                             # STEAM GRID LOGIC (5 Columns, no header)
                             cols = 5
+                            step = 5 if self.fast_scroll_active else 1
                             # Horizontal move with wrapping
                             if move_x != 0:
-                                new_index = (self.nav_index + move_x) % num_widgets
+                                if self.fast_scroll_active:
+                                    # Jump by full rows
+                                    new_index = (self.nav_index + (move_x * step * cols)) % num_widgets
+                                else:
+                                    new_index = (self.nav_index + move_x) % num_widgets
                             # Vertical move
                             elif move_y != 0:
-                                new_index = self.nav_index + (move_y * cols)
+                                new_index = self.nav_index + (move_y * step * cols)
                                 # Boundary check for vertical
                                 if new_index < 0: new_index = self.nav_index # Stop at top
                                 elif new_index >= num_widgets: new_index = self.nav_index # Stop at bottom
                         else:
-                            # Standard Vertical List Wrapping
-                            new_index = (self.nav_index + move_y) % num_widgets
+                            if move_x != 0:
+                                cur = self.nav_list[self.nav_index]
+                                cur_rx = cur.winfo_rootx()
+                                cur_cy = cur.winfo_rooty() + cur.winfo_height() / 2.0
+                                best_idx = None
+                                best_dist = float('inf')
+                                for i, w in enumerate(self.nav_list):
+                                    if i == self.nav_index:
+                                        continue
+                                    wx = w.winfo_rootx()
+                                    if (move_x > 0 and wx <= cur_rx) or (move_x < 0 and wx >= cur_rx):
+                                        continue
+                                    w_cy = w.winfo_rooty() + w.winfo_height() / 2.0
+                                    y_dist = abs(w_cy - cur_cy)
+                                    x_dist = abs(wx - cur_rx)
+                                    score = y_dist * 2 + x_dist
+                                    if score < best_dist:
+                                        best_dist = score
+                                        best_idx = i
+                                if best_idx is not None:
+                                    new_index = best_idx
+                                else:
+                                    new_index = self.nav_index
+                            elif move_y != 0:
+                                new_index = (self.nav_index + move_y) % num_widgets
+                            else:
+                                new_index = self.nav_index
 
                         # Apply changes
                         if 0 <= new_index < num_widgets:
@@ -440,17 +556,41 @@ class UmuInputEngine:
                 self.quit_hold_start = 0
                 self.app.hide_quit_progress()
 
-        #print(f"update loop end tick {time.time()}")
-
     def trigger_input(self, func):
         self.last_input = time.time()
         self.app.toggle_controller_UI(show=True)
         func()
 
+    def trigger_virtual_keyboard(self, show=True):
+        try:
+            if show:
+                subprocess.Popen(["steam", "steam://open/keyboard"])
+            else:
+                subprocess.Popen(["steam", "steam://close/keyboard"])
+        except:
+            pass
+
+    def _toggle_sidebar(self):
+        if self.app.view_state == "sidebar":
+            prev = getattr(self, '_sidebar_prev_state', 'library')
+            self.app.view_state = prev
+            if prev == "library":
+                self.app.engine.rebuild_nav_map_library(self.app.current_view.grid)
+            else:
+                self.app.engine.rebuild_nav_map()
+            self.nav_index = getattr(self, '_sidebar_prev_nav_index', 0)
+            self.sync_visuals()
+            self.app._update_hint_bar()
+        else:
+            self._sidebar_prev_state = self.app.view_state
+            self._sidebar_prev_nav_index = self.nav_index
+            self.app.view_state = "sidebar"
+            self.app.engine.rebuild_nav_map(priority_widget=self.app.library_btn)
+            self.app._update_hint_bar()
+
     def keyboardEvents(self):
         self.app.toggle_controller_UI(show=False)
         self.sound.play("move")
-        pass
 
 
 
