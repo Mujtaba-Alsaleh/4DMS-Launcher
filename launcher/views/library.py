@@ -102,7 +102,7 @@ class LibraryView(ctk.CTkFrame):
                 poster.game_id = g_id
                 poster.game_image = None
                 if art:
-                    gi = GameImage(poster, file_path=art, width=140, height=200, quality=30)
+                    gi = GameImage(poster, file_path=art, width=140, height=200)
                     gi.place(relx=0, rely=0, relwidth=1, relheight=1)
                     gi.lower_widget()
                     poster.game_image = gi

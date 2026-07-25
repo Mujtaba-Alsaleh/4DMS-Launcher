@@ -15,13 +15,14 @@ class DashboardView(ctk.CTkFrame):
 
     def _build(self):
         data = self.app.games[self.game_id]
-        art_path = data.get("art")
+        ctk_img = data.get("art")
         h = 240
         w = 180
-        ctk_img = os.path.exists(art_path) if art_path else False
 
         if ctk_img:
-            GameImage(self, file_path=art_path, width=w, height=h).pack(pady=(20, 0))
+            gi = GameImage(self, file_path=ctk_img, width=w, height=h)
+            gi.pack(pady=(20, 0))
+            gi.start()
         else:
             ctk.CTkFrame(self, width=w, height=h,
                          fg_color=c.BG_PANEL, border_width=2, border_color=c.BG_INPUT).pack(padx=20, pady=5)

@@ -31,7 +31,7 @@ class UmuInputEngine:
         self.rb_hold_duration = 0.5
         self._controller_detected_at = 0
         self.sound = SoundManager()
-        self.sound.play_at_vol("launch",0.15) # play launch as a welcome app sound
+        self.sound.play_at_vol("launch",0.85) # play launch as a welcome app sound
 
         try:
             os.environ["SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS"] = "1"

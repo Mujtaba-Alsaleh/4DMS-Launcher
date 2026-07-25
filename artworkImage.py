@@ -8,7 +8,7 @@ class GameImage(ctk.CTkCanvas):
     A single-threaded CustomTkinter widget that compresses and loops heavy WebPs.
     Hardened against RAM leaks and destruction conflicts without breaking Tkinter internals.
     """
-    def __init__(self, master, file_path, width=250, height=350, quality=45, **kwargs):
+    def __init__(self, master, file_path, width=250, height=350, quality=85, **kwargs):
         bg = "#2B2B2B"
         if "bg" not in kwargs:
             try:
