@@ -69,3 +69,4 @@ class ConfigManager:
             g_data.setdefault("added_at", now)
             g_data.setdefault("notes", "")
             g_data.setdefault("rating", 0)
+            g_data.setdefault("livesplit", False)

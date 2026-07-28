@@ -2,6 +2,7 @@ import os
 import pathlib
 import customtkinter as ctk
 import colors as c
+import livesplit as ls
 from pfx_creator import PrefixCreator
 
 
@@ -30,6 +31,8 @@ class EditorView(ctk.CTkFrame):
         self.usePrefixCreatorForPFXToggle = None
         self.umu_id_lbl = None
         self.umu_id_btn = None
+        self.useLiveSplit = None
+        self.useLiveSplitToggle = None
 
         self.app.current_view = self
         self._build()
@@ -185,6 +188,28 @@ class EditorView(ctk.CTkFrame):
         )
         self.useMangoHudToggle.pack(fill="x", pady=(4, 0))
 
+        self.useLiveSplit = ctk.BooleanVar(value=data.get('livesplit', False))
+        ls_status = self.useLiveSplit.get()
+        gs_active = self.gs_on_var.get()
+        if gs_active:
+            self.useLiveSplit.set(False)
+            ls_text = "LiveSplit: OFF (Gamescope)"
+            ls_color = c.BG_INPUT
+            ls_state = "disabled"
+        else:
+            ls_text = "LiveSplit: ON" if ls_status else "LiveSplit: OFF"
+            ls_color = c.SUCCESS if ls_status else c.DANGER
+            ls_state = "normal"
+        self.useLiveSplitToggle = ctk.CTkButton(
+            inner_right,
+            text=ls_text,
+            font=("Arial", 11, "bold"), height=34,
+            fg_color=ls_color,
+            hover_color=c.ACCENT_HOVER, command=self._toggle_livesplit,
+            state=ls_state
+        )
+        self.useLiveSplitToggle.pack(fill="x", pady=(4, 0))
+
         # LOWER GLOBAL ACTIONS BAR
         act_frame = ctk.CTkFrame(main_layout, fg_color="transparent")
         act_frame.pack(pady=(15, 5))
@@ -231,12 +256,48 @@ class EditorView(ctk.CTkFrame):
         state = "normal" if new_val else "disabled"
         self.gs_w.configure(state=state)
         self.gs_h.configure(state=state)
+        if new_val:
+            self.useLiveSplit.set(False)
+            self.useLiveSplitToggle.configure(text="LiveSplit: OFF (Gamescope)", fg_color=c.BG_INPUT, state="disabled")
+        else:
+            self.useLiveSplitToggle.configure(state="normal")
+            ls_status = self.useLiveSplit.get()
+            self.useLiveSplitToggle.configure(
+                text="LiveSplit: ON" if ls_status else "LiveSplit: OFF",
+                fg_color=c.SUCCESS if ls_status else c.DANGER
+            )
 
     def _toggle_mangohud(self):
         current_val = self.useMangoHud.get()
         self.useMangoHud.set(not current_val)
         new_val = self.useMangoHud.get()
         self.useMangoHudToggle.configure(text="MangoHud Performance Overlay: ON" if new_val else "MangoHud Performance Overlay: OFF", fg_color=c.SUCCESS if new_val else c.DANGER)
+
+    def _toggle_livesplit(self):
+        current_val = self.useLiveSplit.get()
+        new_val = not current_val
+
+        if new_val and not ls.LiveSplitManager.is_installed():
+            def do_download():
+                import threading
+                def _dl():
+                    self.app.after(0, lambda: self.useLiveSplitToggle.configure(
+                        text="LiveSplit: DOWNLOADING...", fg_color=c.BG_INPUT))
+                    ls.LiveSplitManager.download()
+                    self.app.after(0, lambda: (
+                        self.useLiveSplit.set(True),
+                        self.useLiveSplitToggle.configure(text="LiveSplit: ON", fg_color=c.SUCCESS),
+                        self.app.toast.show("LiveSplit installed! Bind shortcuts in Settings.", 10000)
+                    ))
+                threading.Thread(target=_dl, daemon=True).start()
+            self.app.spawn_controller_confirm_modal(func=do_download, msg="Download LiveSplit?")
+            return
+
+        self.useLiveSplit.set(new_val)
+        self.useLiveSplitToggle.configure(
+            text="LiveSplit: ON" if new_val else "LiveSplit: OFF",
+            fg_color=c.SUCCESS if new_val else c.DANGER
+        )
 
     def _editor_clear_label(self, target: ctk.CTkLabel):
         target.configure(text="")
@@ -298,12 +359,14 @@ class EditorView(ctk.CTkFrame):
             self.umu_id_lbl.configure(text=umu_id)
 
     def save(self):
+        gs_active = self.gs_on_var.get()
         self.app.games[self.game_id].update({
             "name": self.e_name.get(), "exe": self.e_exe_lbl.cget("text"), "prefix": self.e_prefix_lbl.cget("text"),
-            "proton": self.e_proton.get(), "gs_on": self.gs_on_var.get(),
+            "proton": self.e_proton.get(), "gs_on": gs_active,
             "gs_w": self.gs_w.get(), "gs_h": self.gs_h.get(), "script": self.e_script_lbl.cget("text"),
             "GAMEID": self.umu_id_lbl.cget("text"),
-            "useMangoHud": self.useMangoHud.get()
+            "useMangoHud": self.useMangoHud.get(),
+            "livesplit": self.useLiveSplit.get() and not gs_active
         })
         self.app.config_manager.save_data(self.app.games)
         self.app.refresh_sidebar()

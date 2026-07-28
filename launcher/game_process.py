@@ -5,6 +5,7 @@ import threading
 import signal
 import psutil
 import colors as c
+import livesplit as ls
 
 
 class GameProcessManager:
@@ -15,6 +16,7 @@ class GameProcessManager:
         self.current_running_game_id = 0
         self.launch_lock = False
         self.launch_lock_cooldown = 2000
+        self.livesplit = ls.LiveSplitManager()
 
     def try_launch(self):
         if self.launch_lock:
@@ -98,6 +100,7 @@ class GameProcessManager:
         if self.game_process:
             self.game_process.terminate()
 
+        self.livesplit.stop()
         self.game_process = None
 
     def _run_process(self):
@@ -157,6 +160,12 @@ class GameProcessManager:
             self.game_process = subprocess.Popen(cmd, env=env, cwd=exe_dir)
             self.current_running_game_id = game_id
 
+            if d.get('livesplit', False) and ls.LiveSplitManager.is_installed():
+                self.livesplit.launch(d['prefix'], p_path)
+                threading.Thread(target=self._connect_livesplit, daemon=True).start()
+            elif d.get('livesplit', False) and not ls.LiveSplitManager.is_installed():
+                print("LiveSplit enabled but not installed. Download from Livesplit settings.")
+
             self.app.after(500, self.app.iconify)
             self.game_process.wait()
 
@@ -165,6 +174,9 @@ class GameProcessManager:
         finally:
             end_time = time.time()
             duration_minutes = round((end_time - start_time) / 60, 2)
+
+            self.livesplit.stop_hotkeys()
+            self.livesplit.disconnect()
 
             if self.game_process is not None:
                 rgid = self.current_running_game_id
@@ -190,3 +202,20 @@ class GameProcessManager:
         self.app.state('normal')
         self.app.lift()
         self.app.focus_force()
+
+    def _connect_livesplit(self):
+        if self.livesplit.process:
+            print(f"LiveSplit PID: {self.livesplit.process.pid}, poll: {self.livesplit.process.poll()}")
+        for attempt in range(12):
+            if not self.is_playing:
+                return
+            if self.livesplit.process and self.livesplit.process.poll() is not None:
+                print(f"LiveSplit process exited with code {self.livesplit.process.returncode}")
+                return
+            time.sleep(5)
+            if self.livesplit.connect():
+                print("LiveSplit TCP connected")
+                self.livesplit.launch_hotkey_listener()
+                return
+            print(f"LiveSplit TCP attempt {attempt + 1}/12 - retrying...")
+        print("LiveSplit TCP connection failed after 60s - is Server component enabled in LiveSplit?")

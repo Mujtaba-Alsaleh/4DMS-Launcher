@@ -7,6 +7,7 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 - Launch Windows games through Proton/Wine on Linux
 - Built-in controller support (gamepad navigation, button prompts, volume overlay)
 - Per-game configuration: Proton version, Gamescope, MangoHUD, Wineprefix, launch scripts
+- LiveSplit integration for speedrunning (auto-launch, TCP server, global hotkeys via evdev)
 - Steam on-screen keyboard integration
 - Game library with artwork, playtime tracking, and favorites
 - UMU ID database for automatic Proton compatibility matching
@@ -17,6 +18,7 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 
 - Python 3.10+
 - [umu-run](https://github.com/Open-Wine-Components/umu-launcher) installed and in PATH
+- Wine (for LiveSplit, optional)
 - pygame-ce (`pip install pygame-ce`)
 - CustomTkinter (`pip install customtkinter`)
 - Steam (optional, for on-screen keyboard)
@@ -65,6 +67,7 @@ python -m nuitka --onefile \
 ├── main.py                  # Entry point
 ├── colors.py                # Theme constants
 ├── input_engine.py          # Controller input handling
+├── livesplit.py             # LiveSplit integration (launch, TCP, hotkeys)
 ├── controller_file_browser.py
 ├── controller_confirm_modal.py
 ├── artworkImage.py          # Game artwork rendering
