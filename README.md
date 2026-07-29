@@ -1,11 +1,11 @@
 # 4DMS-Launcher
 
-A controller-native game launcher for Linux that runs Windows games via Proton using [umu-run](https://github.com/Open-Wine-Components/umu-launcher). Built with Python and CustomTkinter.
+A controller-native game launcher for Linux that runs Windows games via Proton using [umu-run](https://github.com/Open-Wine-Components/umu-launcher). Built with Python and PyQt6.
 
 ## Features
 
 - Launch Windows games through Proton/Wine on Linux
-- Built-in controller support (gamepad navigation, button prompts, volume overlay)
+- Built-in controller support (gamepad navigation via legacy joystick API, button prompts, volume overlay)
 - Per-game configuration: Proton version, Gamescope, MangoHUD, Wineprefix, launch scripts
 - LiveSplit integration for speedrunning (auto-launch, TCP server, global hotkeys via evdev)
 - Steam on-screen keyboard integration
@@ -13,14 +13,16 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 - UMU ID database for automatic Proton compatibility matching
 - Prefix creator for setting up Wineprefixes
 - File browser for navigating paths with controller
+- Themes: Deep Blue, Amber Glow, Synthwave
 
 ## Requirements
 
 - Python 3.10+
 - [umu-run](https://github.com/Open-Wine-Components/umu-launcher) installed and in PATH
 - Wine (for LiveSplit, optional)
-- pygame-ce (`pip install pygame-ce`)
-- CustomTkinter (`pip install customtkinter`)
+- PyQt6 (`pip install PyQt6`)
+- psutil (`pip install psutil`)
+- Pillow (`pip install Pillow`)
 - Steam (optional, for on-screen keyboard)
 
 ## Installation
@@ -28,67 +30,39 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 ```bash
 git clone https://github.com/your-username/4DMS-Launcher.git
 cd 4DMS-Launcher
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python main.py
-```
-
-## Building
-
-### PyInstaller (onefile)
-
-```bash
-pyinstaller --onefile --windowed \
-  --add-data "resources:resources" \
-  --hidden-import="PIL._tkinter_finder" \
-  -n "4DMS Launcher" \
-  main.py
-```
-
-### Nuitka (onefile)
-
-Requires `patchelf` installed on the system.
-
-```bash
-python -m nuitka --onefile \
-  --include-data-dir=resources=resources \
-  --include-module=PIL._tkinter_finder \
-  --output-filename=4DMS-Launcher \
-  --onefile-tempdir-spec="{TEMP}/4DMS" \
-  --python-flag=no_site \
-  --lto=yes \
-  --enable-plugin=tk-inter \
-  main.py
+python launcher_pyqt/main.py
 ```
 
 ## Project Structure
 
 ```
 4DMS-Launcher/
-├── main.py                  # Entry point
-├── colors.py                # Theme constants
-├── input_engine.py          # Controller input handling
-├── livesplit.py             # LiveSplit integration (launch, TCP, hotkeys)
-├── controller_file_browser.py
-├── controller_confirm_modal.py
-├── artworkImage.py          # Game artwork rendering
-├── pfx_creator.py           # Wineprefix creator
-├── resources/               # Icons, sounds, UMU database
-│   └── umu-database.csv
-└── launcher/
-    ├── app.py               # Main application window
-    ├── config.py            # Configuration manager
-    ├── game_process.py      # Game launch/process management
-    ├── artwork.py           # Artwork management
-    ├── umu_database.py      # UMU ID lookup
-    ├── toast.py             # Toast notifications
-    ├── utils.py             # Shared utilities
-    └── views/
-        ├── library.py       # Game library grid
-        ├── dashboard.py     # Game detail view
-        ├── editor.py        # Game settings editor
-        ├── global_settings.py
-        ├── volume_overlay.py
-        └── welcome.py
+├── launcher_pyqt/            # Active PyQt6 codebase
+│   ├── main.py               # Entry point
+│   ├── app.py                # Main application window
+│   ├── config.py             # Configuration manager
+│   ├── game_process.py       # Game launch/process management
+│   ├── artwork.py            # Artwork management
+│   ├── umu_database.py       # UMU ID lookup
+│   ├── toast.py              # Toast notifications
+│   ├── utils.py              # Shared utilities
+│   ├── input_engine.py       # Controller input (joystick API, no SDL/pygame)
+│   ├── controller_confirm_modal.py
+│   ├── controller_file_browser.py
+│   ├── pfx_creator.py        # Wineprefix creator
+│   └── views/
+│       ├── library.py        # Game library grid
+│       ├── dashboard.py      # Game detail view
+│       ├── editor.py         # Game settings editor
+│       ├── global_settings.py
+│       └── volume_overlay.py
+├── colors.py                 # Theme constants (shared)
+├── livesplit.py              # LiveSplit integration (shared)
+├── resources/                # Icons, sounds, UMU database
+└── launcher/                 # Legacy CustomTkinter codebase (inactive)
 ```
 
 ## License

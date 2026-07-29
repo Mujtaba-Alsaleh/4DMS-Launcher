@@ -1,44 +1,44 @@
 # colors.py
 
 THEMES = {
-    "Nordic": {
-        "ACCENT": "#88c0d0",      # Frost Blue
-        "ACCENT_HOVER": "#81a1c1",
-        "SUCCESS": "#a3be8c",     # Sage Green
-        "DANGER": "#bf616a",      # Muted Red
-        "DANGER_HOVER": "#331111" ,
-        "BG_MAIN": "#2e3440",     # Dark Polar Night
-        "BG_PANEL": "#3b4252",
-        "BG_INPUT": "#434c5e",
-        "BG_FOCUS": "#4c566a",    # Focused Grey-Blue
-        "TXT_MAIN": "#eceff4",
-        "TXT_DIM": "#d8dee9"
-    },
     "Deep Blue": {
-        "ACCENT": "#3d91ff",      # Classic Blue
+        "ACCENT": "#3d91ff",
         "ACCENT_HOVER": "#0065f3",
         "SUCCESS": "#2ecc71",
         "DANGER": "#e74c3c",
-        "DANGER_HOVER" : "#331111" ,
-        "BG_MAIN": "#0a0f14",     # Midnight
+        "DANGER_HOVER": "#331111",
+        "BG_MAIN": "#0a0f14",
         "BG_PANEL": "#10161d",
         "BG_INPUT": "#1c252f",
         "BG_FOCUS": "#1a3a5f",
         "TXT_MAIN": "#ffffff",
         "TXT_DIM": "#888888"
     },
-    "Legion Red": {
-        "ACCENT": "#e63946",      # Vivid Red
-        "ACCENT_HOVER": "#ff4d5a",
-        "SUCCESS": "#2a9d8f",
-        "DANGER": "#6b1619",
-        "DANGER_HOVER" : "#331111" ,
-        "BG_MAIN": "#111111",     # Pure Black
-        "BG_PANEL": "#1a1a1a",
-        "BG_INPUT": "#252525",
-        "BG_FOCUS": "#4a0e0e",    # Dark Blood Focus
+    "Amber Glow": {
+        "ACCENT": "#ffa726",
+        "ACCENT_HOVER": "#ef6c00",
+        "SUCCESS": "#2ecc71",
+        "DANGER": "#e74c3c",
+        "DANGER_HOVER": "#331111",
+        "BG_MAIN": "#16120d",
+        "BG_PANEL": "#1e1912",
+        "BG_INPUT": "#282115",
+        "BG_FOCUS": "#3d2f1a",
         "TXT_MAIN": "#ffffff",
-        "TXT_DIM": "#999999"
+        "TXT_DIM": "#aaaaaa"
+    },
+    "Synthwave": {
+        "ACCENT": "#ff2d95",
+        "ACCENT_HOVER": "#cc0066",
+        "SUCCESS": "#2ecc71",
+        "DANGER": "#e74c3c",
+        "DANGER_HOVER": "#331111",
+        "BG_MAIN": "#0d0b1a",
+        "BG_PANEL": "#151130",
+        "BG_INPUT": "#1d1540",
+        "BG_FOCUS": "#301860",
+        "TXT_MAIN": "#ffffff",
+        "TXT_DIM": "#aaaaaa"
     }
 }
 
@@ -57,7 +57,7 @@ TXT_DIM = THEMES["Deep Blue"]["TXT_DIM"]
 
 def apply_theme(theme_name):
     """Updates the global constants to match the chosen theme."""
-    global ACCENT, ACCENT_HOVER, SUCCESS, DANGER,DANGER_HOVER, BG_MAIN, BG_PANEL, BG_INPUT, BG_FOCUS, TXT_MAIN, TXT_DIM
+    global ACCENT, ACCENT_HOVER, SUCCESS, DANGER, DANGER_HOVER, BG_MAIN, BG_PANEL, BG_INPUT, BG_FOCUS, TXT_MAIN, TXT_DIM
     t = THEMES.get(theme_name, THEMES["Deep Blue"])
     ACCENT = t["ACCENT"]
     ACCENT_HOVER = t["ACCENT_HOVER"]
@@ -72,11 +72,7 @@ def apply_theme(theme_name):
     TXT_DIM = t["TXT_DIM"]
 
 def get_dimmed_accent(hex_color, factor=0.4):
-    """Multiplies a hex color by a factor to get a darker version."""
     hex_color = hex_color.lstrip('#')
-    # Convert hex to RGB
     rgb = tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
-    # Multiply each channel
     dimmed_rgb = tuple(max(0, min(255, int(c * factor))) for c in rgb)
-    # Convert back to hex
     return '#{:02x}{:02x}{:02x}'.format(*dimmed_rgb)
