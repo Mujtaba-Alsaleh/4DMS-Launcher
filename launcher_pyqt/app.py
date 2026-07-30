@@ -3,9 +3,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QStackedWidget,
-                             QFrame, QSizePolicy)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
+                             QFrame)
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QShortcut, QKeySequence
 
 import colors as c
 from launcher_pyqt.config import ConfigManager, ARTWORK_DIR
@@ -19,25 +19,20 @@ from launcher_pyqt.views.library import LibraryView
 from launcher_pyqt.views.dashboard import DashboardView
 from launcher_pyqt.views.editor import EditorView
 from launcher_pyqt.views.global_settings import GlobalSettingsView
-from launcher_pyqt.views.volume_overlay import VolumeOverlay
 from launcher_pyqt.controller_confirm_modal import ControllerConfirmModal
 from launcher_pyqt.controller_file_browser import ControllerFileBrowser
 
 HINT_DEFS = {
-    "library": [("A", "Launch"), ("X", "Details"), ("Y", "Fav"), ("LB/RB", "Sort/Filter"), ("Menu", "Sidebar")],
-    "dashboard": [("A", "Play"), ("X", "Settings"), ("Y", "Artwork"), ("B", "Back"), ("Menu", "Sidebar")],
-    "settings": [("Y", "Save"), ("B", "Back"), ("X", "Reload"), ("Menu", "Sidebar")],
-    "sidebar": [],
+    "library": [("A", "Launch"), ("X", "Details"), ("Y", "Fav"), ("LB/RB", "Sort/Filter")],
+    "dashboard": [("A", "Play"), ("X", "Settings"), ("Y", "Artwork"), ("B", "Back")],
+    "settings": [("Y", "Save"), ("B", "Back"), ("X", "Reload")],
     "global_settings": [("B", "Back")],
     "prefix_creator": [("B", "Back")],
-    "browser": [("A", "Select"), ("B", "Back")],
-    "modal": [],
+    "livesplit": [("B", "Back")],
 }
 
 
 class LauncherWindow(QMainWindow):
-    signal_game_exit = pyqtSignal()
-
     def __init__(self):
         super().__init__()
         self.args = self._parse_args()
@@ -55,7 +50,13 @@ class LauncherWindow(QMainWindow):
         self.proton_paths = self.config_manager.scan_proton_versions()
         self.nav_stack = []
         self.play_btn = None
-        self.livesplit = None
+        import livesplit as ls
+        self.livesplit = ls.LiveSplitManager()
+        self._sidebar_visible = True
+
+        game_count = sum(1 for k in self.config_data if k != "settings")
+        if game_count > 0:
+            self._sidebar_visible = False
 
         self.has_gamescope = shutil.which("gamescope") is not None
         self.has_umu = shutil.which("umu-run") is not None
@@ -63,17 +64,17 @@ class LauncherWindow(QMainWindow):
         self._setup_window()
         self._create_sidebar()
         self._create_main_content()
-        self._create_controller_ui()
         self._create_quit_overlay()
         self._create_bottom_bar()
 
         self.toast = ToastManager(self._content_area)
-        self.volume_overlay = VolumeOverlay(self._content_area)
         self.game_process_manager = GameProcessManager(self)
         self.engine = UmuInputEngineQt(self)
 
-        self.show_library()
+        self._sidebar_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self._sidebar_shortcut.activated.connect(self._toggle_sidebar_visibility)
 
+        self.show_library()
         self.engine.start()
 
     def _parse_args(self):
@@ -115,6 +116,8 @@ class LauncherWindow(QMainWindow):
         self._sidebar = QFrame(self)
         self._sidebar.setFixedWidth(280)
         self._sidebar.setStyleSheet(f"background: {c.BG_PANEL}; border: none;")
+        if not self._sidebar_visible:
+            self._sidebar.hide()
 
         sb_layout = QVBoxLayout(self._sidebar)
         sb_layout.setContentsMargins(0, 0, 0, 0)
@@ -159,6 +162,12 @@ class LauncherWindow(QMainWindow):
         sb_layout.addWidget(self.prefix_creator_btn)
         self.nav_widgets.append(self.prefix_creator_btn)
 
+        self.livesplit_btn = QPushButton("LiveSplit")
+        self.livesplit_btn.setStyleSheet(btn_style)
+        self.livesplit_btn.clicked.connect(self.show_livesplit)
+        sb_layout.addWidget(self.livesplit_btn)
+        self.nav_widgets.append(self.livesplit_btn)
+
         self.settings_btn = QPushButton("SETTINGS")
         self.settings_btn.setStyleSheet(btn_style)
         self.settings_btn.clicked.connect(self.show_global_settings)
@@ -187,6 +196,7 @@ class LauncherWindow(QMainWindow):
             "settings": self.library_btn,
             "global_settings": self.settings_btn,
             "prefix_creator": self.prefix_creator_btn,
+            "livesplit": self.livesplit_btn,
         }
         active_btn = active_map.get(self.view_state)
         base_style = """
@@ -203,7 +213,7 @@ class LauncherWindow(QMainWindow):
             QPushButton:hover { background: %s; }
         """ % (c.ACCENT, c.TXT_MAIN, c.TXT_MAIN, c.ACCENT_HOVER)
         for btn in self.nav_widgets:
-            if btn in (self.library_btn, self.add_btn, self.prefix_creator_btn, self.settings_btn):
+            if btn in (self.library_btn, self.add_btn, self.prefix_creator_btn, self.livesplit_btn, self.settings_btn):
                 if btn == active_btn:
                     btn.setStyleSheet(active_style)
                 else:
@@ -227,18 +237,6 @@ class LauncherWindow(QMainWindow):
         main_layout.addWidget(self._sidebar)
         main_layout.addWidget(self._content_area, 1)
         self.setCentralWidget(main_widget)
-
-    def _create_controller_ui(self):
-        self._icon_size = (24, 24)
-        self._icon_labels = {}
-        for key in ("A", "B", "X", "Y", "menu", "view"):
-            lbl = QLabel(self._content_area)
-            pix = get_resources_icon(f"button_{key.lower()}", self._icon_size)
-            if pix:
-                lbl.setPixmap(pix)
-            lbl.hide()
-            self._icon_labels[key] = lbl
-        self._icon_anchors = {}
 
     def _create_quit_overlay(self):
         self._quit_overlay = QFrame(self._content_area)
@@ -267,15 +265,12 @@ class LauncherWindow(QMainWindow):
         bb_layout.setContentsMargins(16, 2, 16, 2)
         bb_layout.setSpacing(8)
 
-        # Hint labels (left)
-        self._hint_labels = []
         self._hint_layout = QHBoxLayout()
         self._hint_layout.setSpacing(0)
         bb_layout.addLayout(self._hint_layout)
 
         bb_layout.addStretch(1)
 
-        # Status (right)
         self._lbl_battery = QLabel()
         self._lbl_battery.setStyleSheet(f"color: {c.TXT_DIM}; font: 12px; background: transparent;")
         bb_layout.addWidget(self._lbl_battery)
@@ -292,7 +287,6 @@ class LauncherWindow(QMainWindow):
         self._update_bottom_bar()
 
     def _update_bottom_bar(self):
-        # Update hints
         for i in reversed(range(self._hint_layout.count())):
             w = self._hint_layout.itemAt(i).widget()
             if w:
@@ -303,13 +297,12 @@ class LauncherWindow(QMainWindow):
             lbl.setStyleSheet(f"color: {c.TXT_DIM}; font: 11px; background: transparent;")
             self._hint_layout.addWidget(lbl)
 
-        # Update clock + battery
-        self._lbl_clock.setText(time.strftime("%H:%M %p"))
+        self._lbl_clock.setText(time.strftime("%I:%M %p"))
         import psutil
         battery = psutil.sensors_battery()
         if battery:
             percent = f"{int(battery.percent)}%"
-            text = f"{percent}"
+            text = f"🔋 {percent}"
             if battery.power_plugged:
                 text += " \u26a1"
             self._lbl_battery.setText(text)
@@ -342,8 +335,7 @@ class LauncherWindow(QMainWindow):
         return ""
 
     def _select_logo(self):
-        match = {"Deep Blue": "logo", "Nordic": "logo_nordic", "Legion Red": "logo_red"}
-        return match.get(self.current_theme, "logo")
+        return "logo"
 
     # ==================== NAVIGATION ====================
 
@@ -352,12 +344,6 @@ class LauncherWindow(QMainWindow):
             self.nav_stack.append(self.view_state)
 
     def handle_back(self):
-        if self.view_state == "modal":
-            return
-        if self.view_state == "sidebar":
-            if self.engine:
-                self.engine._toggle_sidebar()
-            return
         if self.nav_stack:
             prev = self.nav_stack.pop()
             if prev == "library":
@@ -366,26 +352,53 @@ class LauncherWindow(QMainWindow):
             elif prev == "dashboard" and self.current_game_id:
                 self.show_dashboard(self.current_game_id)
                 return
+            elif prev == "settings" and self.current_game_id:
+                self.show_editor()
+                return
         if self.view_state == "settings":
             self.show_dashboard(self.current_game_id)
-        elif self.view_state == "library":
-            self.view_state = "sidebar"
-            if self.engine:
-                self.engine.rebuild_nav_map(include_sidebar=True, priority_widget=self.library_btn)
-            return
-        elif self.view_state in ("global_settings", "prefix_creator"):
+        elif self.view_state in ("global_settings", "prefix_creator", "livesplit"):
             self.show_library()
             return
         elif self.view_state == "dashboard":
             self.show_library()
             return
         if self.engine:
-            self.engine.rebuild_nav_map()
+            self.engine.rescan()
+
+    def _hide_sidebar_for_view(self):
+        if self._sidebar_visible:
+            self._sidebar_visible = False
+            self._sidebar.hide()
 
     def current_view(self):
         return self.stack.currentWidget()
 
+    def _toggle_sidebar_visibility(self):
+        self._sidebar_visible = not self._sidebar_visible
+        self._sidebar.setVisible(self._sidebar_visible)
+        v = self.current_view()
+        if v and hasattr(v, '_rebuild'):
+            v._rebuild()
+        if self.engine:
+            self.engine.rescan()
+
+    def show_livesplit(self):
+        self._hide_sidebar_for_view()
+        self._push_nav()
+        self.view_state = "livesplit"
+        self._clear_stack()
+        from launcher_pyqt.views.livesplit_view import LiveSplitView
+        view = LiveSplitView(self)
+        self.stack.addWidget(view)
+        self.stack.setCurrentWidget(view)
+        self._update_bottom_bar()
+        self._update_sidebar_active()
+        if self.engine:
+            self.engine.rescan()
+
     def show_library(self):
+        self._hide_sidebar_for_view()
         self._push_nav()
         self.view_state = "library"
         self._clear_stack()
@@ -394,14 +407,9 @@ class LauncherWindow(QMainWindow):
         self.stack.setCurrentWidget(view)
         self._update_bottom_bar()
         self._update_sidebar_active()
-        if self.engine:
-            def _lib_nav():
-                v = self.current_view()
-                if v and hasattr(v, 'grid') and v.grid:
-                    self.engine.rebuild_nav_map_library(v.grid)
-            QTimer.singleShot(100, _lib_nav)
 
     def show_dashboard(self, game_id):
+        self._hide_sidebar_for_view()
         self._push_nav()
         self.view_state = "dashboard"
         self.current_game_id = game_id
@@ -412,9 +420,10 @@ class LauncherWindow(QMainWindow):
         self._update_bottom_bar()
         self._update_sidebar_active()
         if self.engine:
-            self.engine.rebuild_nav_map()
+            self.engine.rescan()
 
     def show_editor(self):
+        self._hide_sidebar_for_view()
         self._push_nav()
         self.view_state = "settings"
         self._clear_stack()
@@ -424,9 +433,10 @@ class LauncherWindow(QMainWindow):
         self._update_bottom_bar()
         self._update_sidebar_active()
         if self.engine:
-            self.engine.rebuild_nav_map()
+            self.engine.rescan()
 
     def show_global_settings(self):
+        self._hide_sidebar_for_view()
         self._push_nav()
         self.view_state = "global_settings"
         self._clear_stack()
@@ -436,20 +446,22 @@ class LauncherWindow(QMainWindow):
         self._update_bottom_bar()
         self._update_sidebar_active()
         if self.engine:
-            self.engine.rebuild_nav_map()
+            self.engine.rescan()
 
-    def create_pfx_menu(self):
+    def create_pfx_menu(self, finish_callback=None):
+        self._hide_sidebar_for_view()
         self._push_nav()
         self.view_state = "prefix_creator"
         self._clear_stack()
         from launcher_pyqt.pfx_creator import PrefixCreator
-        view = PrefixCreator(self, browser_callback=self.browse)
+        view = PrefixCreator(self, browser_callback=self.browse,
+                             on_finish_callback=finish_callback)
         self.stack.addWidget(view)
         self.stack.setCurrentWidget(view)
-        if self.engine:
-            self.engine.rebuild_nav_map()
         self._update_bottom_bar()
         self._update_sidebar_active()
+        if self.engine:
+            self.engine.rescan()
 
     def _clear_stack(self):
         while self.stack.count():
@@ -506,22 +518,13 @@ class LauncherWindow(QMainWindow):
                 label.setText(path)
 
         self.engine.sound.play("modal")
-        prev_state = self.view_state
-        self.view_state = "browser"
         browser = ControllerFileBrowser(self, is_file=is_file, callback=on_selected, engine=self.engine)
         browser.exec()
-        self.view_state = prev_state
 
     def spawn_controller_confirm_modal(self, func=None, msg=None):
-        current_vs = self.view_state
-        self.view_state = "modal"
-
         def on_user_decision(confirmed):
             if confirmed and func:
                 func()
-            self.view_state = current_vs
-            if self.engine:
-                self.engine.rebuild_nav_map()
 
         modal = ControllerConfirmModal(self, engine=self.engine, on_result=on_user_decision, msg=msg)
         modal.exec()
@@ -532,17 +535,7 @@ class LauncherWindow(QMainWindow):
         self._bottom_bar.setStyleSheet(f"background: {c.BG_PANEL}; border-top: 1px solid {c.BG_INPUT};")
         self._update_sidebar_active()
 
-    # ==================== CONTROLLER UI ====================
-
-    def anchor_icon(self, key, widget):
-        self._icon_anchors[key] = widget
-
-    def clear_controller_ui(self):
-        keys = [k for k in self._icon_anchors if k != "view"]
-        for k in keys:
-            del self._icon_anchors[k]
-            if k in self._icon_labels:
-                self._icon_labels[k].hide()
+    # ==================== QUIT OVERLAY ====================
 
     def show_quit_progress(self, percent):
         self._quit_overlay.show()

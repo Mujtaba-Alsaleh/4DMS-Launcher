@@ -1,12 +1,16 @@
 import os, subprocess, threading
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-                             QLabel, QLineEdit, QCheckBox, QTextEdit,
-                             QGridLayout, QScrollArea, QFrame, QFileDialog)
-from PyQt6.QtCore import Qt, QTimer
+                             QLabel, QCheckBox, QTextEdit,
+                             QGridLayout, QScrollArea, QFileDialog, QButtonGroup,
+                             QFrame)
+from PyQt6.QtCore import QTimer, pyqtSignal
 import colors as c
 
 
 class PrefixCreator(QWidget):
+    log_signal = pyqtSignal(str)
+    finish_signal = pyqtSignal(bool)
+
     def __init__(self, parent=None, browser_callback=None, on_finish_callback=None, on_close_callback=None):
         super().__init__(parent)
         self.browser_callback = browser_callback
@@ -20,6 +24,9 @@ class PrefixCreator(QWidget):
             "vcrun2022": False, "dotnet48": False, "corefonts": False,
             "d3dx9": False, "faudio": False, "xna40": False, "physx": False
         }
+
+        self.log_signal.connect(self._append_log)
+        self.finish_signal.connect(self._finish_process)
 
         self._build_ui()
 
@@ -62,20 +69,24 @@ class PrefixCreator(QWidget):
         arch_lbl = QLabel("Architecture:")
         arch_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 16px;")
         arch_row.addWidget(arch_lbl)
+        self.arch_group = QButtonGroup(self)
         self.arch_64 = QPushButton("64-bit (win64)")
         self.arch_64.setCheckable(True)
         self.arch_64.setChecked(True)
         self.arch_64.setStyleSheet(f"""
-            QPushButton {{ background: {c.ACCENT}; color: {c.TXT_MAIN}; font: 14px;
-                           border-radius: 6px; padding: 6px 14px; }}
-            QPushButton:checked {{ background: {c.BG_FOCUS}; }}
+            QPushButton {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 14px;
+                           border: 1px solid {c.ACCENT}; border-radius: 6px; padding: 6px 14px; }}
+            QPushButton:checked {{ background: {c.ACCENT}; color: {c.BG_MAIN}; border: 1px solid {c.ACCENT}; }}
+            QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
         """)
         self.arch_64.clicked.connect(lambda: setattr(self, 'arch', 'win64'))
+        self.arch_group.addButton(self.arch_64)
         arch_row.addWidget(self.arch_64)
         self.arch_32 = QPushButton("32-bit (win32)")
         self.arch_32.setCheckable(True)
         self.arch_32.setStyleSheet(self.arch_64.styleSheet())
         self.arch_32.clicked.connect(lambda: setattr(self, 'arch', 'win32'))
+        self.arch_group.addButton(self.arch_32)
         arch_row.addWidget(self.arch_32)
         form.addLayout(arch_row)
 
@@ -84,7 +95,10 @@ class PrefixCreator(QWidget):
         deps_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 18px;")
         form.addWidget(deps_lbl)
 
-        deps_grid = QGridLayout()
+        deps_card = QFrame()
+        deps_card.setStyleSheet(f"QFrame {{ background: {c.BG_PANEL}; border-radius: 8px; padding: 12px; }}")
+        deps_grid = QGridLayout(deps_card)
+        deps_grid.setContentsMargins(12, 12, 12, 12)
         deps_grid.setSpacing(10)
         self.dep_checkboxes = {}
         for idx, name in enumerate(self.deps.keys()):
@@ -95,7 +109,7 @@ class PrefixCreator(QWidget):
             """)
             self.dep_checkboxes[name] = cb
             deps_grid.addWidget(cb, idx // 3, idx % 3)
-        form.addLayout(deps_grid)
+        form.addWidget(deps_card)
 
         # Buttons
         btn_row = QHBoxLayout()
@@ -149,11 +163,14 @@ class PrefixCreator(QWidget):
                 self.prefix_path = path
                 self.path_label.setText(path)
 
-    def log(self, message):
+    def _append_log(self, message):
         self.log_text.append(message)
         self.log_text.verticalScrollBar().setValue(
             self.log_text.verticalScrollBar().maximum()
         )
+
+    def log(self, message):
+        self.log_signal.emit(message)
 
     def _start_process(self):
         if self.is_running:
@@ -190,18 +207,18 @@ class PrefixCreator(QWidget):
             proc.wait()
             if proc.returncode != 0:
                 self.log("Error creating prefix.")
-                self._finish_process(False)
+                self.finish_signal.emit(False)
                 return
             self.log("Prefix created successfully.\n")
         except Exception as e:
             self.log(f"Error: {str(e)}")
-            self._finish_process(False)
+            self.finish_signal.emit(False)
             return
 
         selected_deps = [name for name, cb in self.dep_checkboxes.items() if cb.isChecked()]
         if not selected_deps:
             self.log("No dependencies selected. Done.")
-            self._finish_process(True)
+            self.finish_signal.emit(True)
             return
 
         self.log(f"[Step 2/2] Installing: {', '.join(selected_deps)}\n")
@@ -224,7 +241,7 @@ class PrefixCreator(QWidget):
         if self.on_finish_callback:
             QTimer.singleShot(2000, self._finish_on_editor)
         else:
-            self._finish_process(True)
+            self.finish_signal.emit(True)
 
     def _finish_process(self, success):
         self.is_running = False

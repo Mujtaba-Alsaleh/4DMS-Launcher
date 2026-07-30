@@ -1,11 +1,8 @@
 import os
 import re
-import sys
 import time
-from pathlib import Path
-from PIL import Image
-from PyQt6.QtGui import QPixmap, QImage
-from PyQt6.QtCore import QByteArray, QIODevice, QBuffer
+
+from PyQt6.QtGui import QPixmap
 
 
 def normalize(text):
@@ -63,16 +60,4 @@ def get_resources_icon(name, size=None):
         if size:
             pixmap = pixmap.scaled(size[0], size[1])
         return pixmap
-    return None
-
-
-def get_art_pixmap(path, size=None):
-    try:
-        if path and os.path.exists(path):
-            pixmap = QPixmap(path)
-            if size:
-                pixmap = pixmap.scaled(size[0], size[1])
-            return pixmap
-    except Exception as e:
-        print(f"Image load error: {e}")
     return None

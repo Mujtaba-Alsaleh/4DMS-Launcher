@@ -2,9 +2,45 @@ import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QFrame)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QPainterPath
 from launcher_pyqt.artworkImage import GameImage
 from launcher_pyqt.utils import format_playtime
 import colors as c
+
+
+class ArtworkWidget(QWidget):
+    def __init__(self, art_path, w, h):
+        super().__init__()
+        self.setFixedSize(w, h)
+        self._pix = QPixmap(art_path)
+        if not self._pix.isNull():
+            self._pix = self._pix.scaled(w, h,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation)
+        ext = os.path.splitext(art_path)[1].lower()
+        self._gi = None
+        if ext in ('.webp', '.gif'):
+            gi = GameImage(self, art_path, 210, 280, quality=75)
+            gi.hide()
+            self._gi = gi
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect()
+        path = QPainterPath()
+        path.addRoundedRect(r.x(), r.y(), r.width(), r.height(), 12, 12)
+        p.setClipPath(path)
+        if self._pix and not self._pix.isNull():
+            p.drawPixmap(r, self._pix)
+        p.end()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._gi:
+            self._gi.show()
+            self._gi.raise_()
+            self._gi.start()
 
 
 class DashboardView(QWidget):
@@ -22,119 +58,141 @@ class DashboardView(QWidget):
         layout.setSpacing(12)
         layout.setContentsMargins(30, 20, 30, 20)
 
-        # Artwork display
         art = data.get("art")
-        h, w = 280, 210
         if art and os.path.exists(art):
-            gi = GameImage(self, art, w, h)
-            gi.setFixedSize(w, h)
-            gi.setStyleSheet(f"border-radius: 12px; border: 2px solid {c.BG_INPUT};")
-            layout.addWidget(gi, alignment=Qt.AlignmentFlag.AlignCenter)
-            gi.start()
+            aw = ArtworkWidget(art, 210, 280)
+            layout.addWidget(aw, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        name_lbl = QLabel(data.get('name', ''))
+        name = data.get("name", "Unknown")
+        name_lbl = QLabel(name)
+        name_lbl.setStyleSheet(f"color: {c.ACCENT}; font: bold 24px;")
         name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        name_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 26px;")
         layout.addWidget(name_lbl)
 
-        # Action buttons
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(12)
-        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        play_text = "PLAY"
-        play_color = c.SUCCESS
-        if self.app.game_process_manager.is_playing:
-            play_text = "STOP"
-            play_color = c.DANGER
-
-        play_btn = QPushButton(play_text)
-        play_btn.setFixedSize(180, 44)
+        play_btn = QPushButton("PLAY")
         play_btn.setStyleSheet(f"""
-            QPushButton {{ background: {play_color}; color: white; font: bold 18px;
-                           border-radius: 10px; }}
-            QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
+            QPushButton {{ background: #2ecc71; color: white; font: bold 16px;
+                           border-radius: 8px; padding: 10px; }}
+            QPushButton:hover {{ background: #27ae60; }}
         """)
-        play_btn.clicked.connect(self.app.game_process_manager.try_launch)
-        btn_row.addWidget(play_btn)
+        play_btn.clicked.connect(lambda: self.app.try_launch_game())
         self.app.play_btn = play_btn
+        if self.app.game_process_manager.is_playing and self.app.current_game_id == self.game_id:
+            play_btn.setText("STOP")
+            play_btn.setStyleSheet(f"""
+                QPushButton {{ background: #e74c3c; color: white; font: bold 16px;
+                               border-radius: 8px; padding: 10px; }}
+                QPushButton:hover {{ background: #c0392b; }}
+            """)
 
-        edit_btn = QPushButton("SETTINGS")
-        edit_btn.setFixedSize(140, 44)
+        btn_row = QHBoxLayout()
+        btn_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        btn_row.setSpacing(12)
+
+        art_btn = QPushButton("Browse Artwork")
+        art_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {c.ACCENT}; font: bold 12px;
+                           border: 1px solid {c.ACCENT}; border-radius: 6px; padding: 8px 16px; }}
+            QPushButton:hover {{ background: {c.ACCENT_HOVER}; color: {c.TXT_MAIN}; }}
+        """)
+        art_btn.clicked.connect(self._browse_artwork)
+        btn_row.addWidget(art_btn)
+
+        edit_btn = QPushButton("Game Settings")
         edit_btn.setStyleSheet(f"""
-            QPushButton {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: bold 14px;
-                           border-radius: 10px; }}
+            QPushButton {{ background: transparent; color: {c.ACCENT}; font: bold 12px;
+                           border: 1px solid {c.ACCENT}; border-radius: 6px; padding: 8px 16px; }}
+            QPushButton:hover {{ background: {c.ACCENT_HOVER}; color: {c.TXT_MAIN}; }}
+        """)
+        edit_btn.clicked.connect(lambda: self.app.show_editor())
+        btn_row.addWidget(edit_btn)
+
+        fav_char = "\u2605" if data.get("favorite") else "\u2606"
+        fav_btn = QPushButton(fav_char)
+        fav_btn.setFixedSize(38, 34)
+        fav_btn.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {c.ACCENT}; font: 16px;
+                           border: 1px solid {c.ACCENT}; border-radius: 6px; }}
             QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
         """)
-        edit_btn.clicked.connect(self.app.show_editor)
-        btn_row.addWidget(edit_btn)
+        fav_btn.clicked.connect(self._toggle_favorite)
+        btn_row.addWidget(fav_btn)
+
         layout.addLayout(btn_row)
-
-        self.art_btn = QPushButton("SET ARTWORK")
-        self.art_btn.setFixedSize(160, 36)
-        self.art_btn.setStyleSheet(f"""
-            QPushButton {{ background: {c.BG_INPUT}; color: {c.TXT_DIM}; font: bold 11px;
-                           border-radius: 8px; }}
-            QPushButton:hover {{ background: {c.ACCENT_HOVER}; border: 1px solid {c.ACCENT}; }}
-        """)
-        self.art_btn.clicked.connect(self._browse_artwork)
-        layout.addWidget(self.art_btn, alignment=Qt.AlignmentFlag.AlignCenter)
-
-        if art:
-            rm_btn = QPushButton("REMOVE ARTWORK")
-            rm_btn.setStyleSheet(f"""
-                QPushButton {{ background: transparent; color: {c.DANGER}; font: bold 11px;
-                               border: 1px solid {c.DANGER}; border-radius: 6px; padding: 4px 12px; }}
-                QPushButton:hover {{ background: {c.DANGER_HOVER}; }}
-            """)
-            rm_btn.clicked.connect(self._remove_artwork)
-            layout.addWidget(rm_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(play_btn)
 
         info_frame = QFrame()
         info_frame.setStyleSheet(f"""
             QFrame {{ border: 1px solid {c.BG_INPUT}; border-radius: 10px;
-                      background: transparent; padding: 4px; }}
+                       background: {c.BG_PANEL}; padding: 12px; }}
         """)
         info_layout = QVBoxLayout(info_frame)
         info_layout.setSpacing(6)
-        info_layout.setContentsMargins(16, 12, 16, 12)
 
-        def add_row(label, value, val_color=c.TXT_MAIN):
+        fields = [
+            ("Exe", data.get("exe", "")),
+            ("Prefix", data.get("prefix", "")),
+            ("Proton", data.get("proton", "Default (UMU Internal)")),
+            ("Store", data.get("store", "none")),
+            ("Play Time", format_playtime(data.get("playtime"))),
+            ("Launch Count", str(data.get("launch_count", 0))),
+        ]
+        for label_text, value in fields:
             row = QHBoxLayout()
-            lbl = QLabel(label)
-            lbl.setStyleSheet(f"color: gray; font: bold 11px;")
+            lbl = QLabel(f"{label_text}:")
+            lbl.setStyleSheet(f"color: {c.ACCENT}; font: bold 11px;")
+            lbl.setFixedWidth(100)
             row.addWidget(lbl)
-            val_lbl = QLabel(value)
-            val_lbl.setStyleSheet(f"color: {val_color}; font: 11px;")
-            row.addWidget(val_lbl, alignment=Qt.AlignmentFlag.AlignRight)
+            val_lbl = QLabel(value if value else "-")
+            val_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: 11px;")
+            if value:
+                val_lbl.setToolTip(value)
+            val_lbl.setMinimumWidth(100)
+            row.addWidget(val_lbl, 1, alignment=Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             info_layout.addLayout(row)
 
-        add_row("PROTON", data.get('proton', ''), c.ACCENT)
-        add_row("PREFIX", data.get('prefix', ''), "#bbbbbb")
-        gs_active = data.get('gs_on', False) and self.app.has_gamescope
-        add_row("GAMESCOPE", "ENABLED" if gs_active else "DISABLED", "#2ecc71" if gs_active else "#e74c3c")
-        hud_active = data.get('useMangoHud', False)
-        add_row("MANGOHUD", "ACTIVE" if hud_active else "OFF", "#2ecc71" if hud_active else "gray")
-        add_row("PLAYTIME", format_playtime(data.get('playtime')), c.ACCENT)
         layout.addWidget(info_frame)
 
+        art = data.get("art")
+        if art and os.path.exists(art):
+            rm_btn = QPushButton("Remove Artwork")
+            rm_btn.setStyleSheet(f"""
+                QPushButton {{ background: transparent; color: {c.DANGER}; font: bold 11px;
+                               border: 1px solid {c.DANGER}; border-radius: 6px;
+                               padding: 6px; }}
+                QPushButton:hover {{ background: {c.DANGER_HOVER}; color: {c.TXT_MAIN}; }}
+            """)
+            rm_btn.clicked.connect(self._remove_artwork)
+            layout.addWidget(rm_btn, alignment=Qt.AlignmentFlag.AlignCenter)
+
         if self.app.engine:
-            self.app.engine.rebuild_nav_map(priority_widget=play_btn)
+            self.app.engine.rescan(priority_widget=play_btn)
+
+    def _toggle_favorite(self):
+        data = self.app.config_data[self.game_id]
+        data["favorite"] = not data.get("favorite", False)
+        self.app.config_manager.save_data(self.app.config_data)
+        self.app.show_dashboard(self.game_id)
 
     def _browse_artwork(self):
-        from launcher_pyqt.controller_file_browser import ControllerFileBrowser
+        prev_state = self.app.view_state
+        self.app.view_state = "browser"
+        self.app.engine.sound.play("modal")
 
         def on_selected(path):
             if path:
-                self.app.artwork_manager.select(self.game_id, path, self.app.config_data, self.app.config_manager.save_data)
+                data = self.app.config_data[self.game_id]
+                data["art"] = path
+                self.app.config_manager.save_data(self.app.config_data)
                 self.app.show_dashboard(self.game_id)
 
-        if self.app.engine:
-            self.app.engine.sound.play("modal")
-        self.app.view_state = "browser"
-        browser = ControllerFileBrowser(self.app, is_file=True, is_art=True,
-                                        callback=on_selected, engine=self.app.engine)
+        from launcher_pyqt.controller_file_browser import ControllerFileBrowser
+        browser = ControllerFileBrowser(self, is_file=True, is_art=True, callback=on_selected, engine=self.app.engine)
         browser.exec()
+        self.app.view_state = prev_state
 
     def _remove_artwork(self):
-        self.app.artwork_manager.remove(self.game_id, self.app.config_data, self.app.config_manager.save_data)
+        data = self.app.config_data[self.game_id]
+        data["art"] = ""
+        self.app.config_manager.save_data(self.app.config_data)
         self.app.show_dashboard(self.game_id)

@@ -3,7 +3,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import QWidget, QPushButton, QLineEdit, QCheckBox, QComboBox, QGridLayout
+from PyQt6.QtWidgets import QWidget, QPushButton, QLineEdit, QCheckBox, QComboBox, QApplication
 
 import colors as c
 
@@ -24,7 +24,6 @@ class SoundManager:
         }
         self._last_played = {}
         self._player = None
-        # pw-play (PipeWire native), then paplay (PulseAudio compat), then aplay (ALSA)
         for cmd in ("pw-play", "paplay", "aplay"):
             try:
                 subprocess.run((cmd, "--version"), capture_output=True)
@@ -60,7 +59,7 @@ class SoundManager:
 
 
 # ---- Joystick via /dev/input/js* (Linux legacy joystick API) --------------
-# struct js_event { __u32 time; __s16 value; __u8 type; __u8 number; }
+
 _JS_EVENT_FMT = struct.Struct("IhBB")
 _JS_EVENT_BUTTON = 0x01
 _JS_EVENT_AXIS = 0x02
@@ -69,8 +68,6 @@ _JS_EVENT_INIT = 0x80
 _JSIOCGAXES = 0x80016a11
 _JSIOCGBUTTONS = 0x80016a12
 
-# Heuristic: most modern controllers expose 6 analog axes (LX, LY, RX, RY, L2, R2).
-# Any axes beyond 6 are treated as hat axes in pairs (6/7 = hat0, 8/9 = hat1, …).
 _ANALOG_AXES = 6
 
 
@@ -106,8 +103,6 @@ class Joystick:
 
         self.poll()
 
-    # ---- public API matching pygame.joystick.Joystick --------------------
-
     def get_button(self, n: int) -> int:
         try:
             return self.buttons[n]
@@ -136,7 +131,6 @@ class Joystick:
         pass
 
     def poll(self):
-        """Non-blocking read of all pending js events, updating internal state."""
         if self.fd is None:
             return
         try:
@@ -208,14 +202,12 @@ class UmuInputEngineQt:
         self.nav_list = []
         self.nav_index = 0
         self.last_input = 0
-        self.last_input_button = 0
+        self._last_input_button = 0
         self.cooldown = 0.4
         self.button_cooldown = 0.15
         self.joysticks: list[Joystick] = []
         self._axes_armed = {0: True, 1: True}
         self._controller_detected_at = 0
-        self._sidebar_prev_state = None
-        self._sidebar_prev_nav_index = 0
         self._lib_prev_btn = None
         self._prev_view_state = None
 
@@ -226,8 +218,9 @@ class UmuInputEngineQt:
         self.rb_hold_duration = 0.5
 
         self.on_screen_keyboard_open = False
-        self.in_file_browser = False
-        self.current_file_browser = None
+
+        self._nav_mode = "none"
+        self._modal_ref = None
 
         self.sound = SoundManager()
 
@@ -259,46 +252,70 @@ class UmuInputEngineQt:
         except RuntimeError:
             return False
 
-    def rebuild_nav_map(self, include_sidebar=False, priority_widget=None):
+    # ---- Nav state machine -------------------------------------------------
+
+    def _determine_mode(self):
+        modal = None
+        try:
+            modal = QApplication.activeModalWidget()
+        except RuntimeError:
+            pass
+        if modal:
+            from launcher_pyqt.controller_file_browser import ControllerFileBrowser
+            from launcher_pyqt.controller_confirm_modal import ControllerConfirmModal
+            if isinstance(modal, ControllerFileBrowser):
+                return "file_browser", modal
+            elif isinstance(modal, ControllerConfirmModal):
+                return "modal", modal
+            return "modal", modal
+        vs = self.app.view_state
+        if vs == "library":
+            return "grid", None
+        elif vs in ("dashboard", "settings", "global_settings", "prefix_creator", "livesplit"):
+            return "list", None
+        return "none", None
+
+    def rescan(self, priority_widget=None):
+        mode, modal = self._determine_mode()
+        self._nav_mode = mode
+        self._modal_ref = modal
         self.nav_list = []
-        if include_sidebar:
-            nav_widgets = getattr(self.app, 'nav_widgets', [])
-            self.nav_list.extend(nav_widgets)
-        view = self.app.current_view()
-        if view:
-            self._scan_widget_tree(view)
+
+        if mode == "none":
+            self.nav_index = 0
+            self.sync_visuals()
+            return
+
+        if mode == "grid":
+            view = self.app.current_view()
+            if view and hasattr(view, 'grid') and view.grid:
+                for child in view.grid.findChildren(QWidget):
+                    if hasattr(child, 'game_id') and child.isVisible():
+                        self.nav_list.append(child)
+
+        elif mode == "list":
+            view = self.app.current_view()
+            if view:
+                self._scan_widget_tree(view)
+
+        elif mode == "file_browser":
+            self._scan_widget_tree(modal)
+
+        elif mode == "modal":
+            self._scan_widget_tree(modal)
+
+        sidebar_btn_count = 0
+        if mode in ("grid", "list") and self.app._sidebar.isVisible():
+            sidebar_nav = [btn for btn in self.app.nav_widgets
+                           if btn.isVisible() and btn.isEnabled()]
+            sidebar_btn_count = len(sidebar_nav)
+            self.nav_list = sidebar_nav
+        self._sidebar_btn_count = sidebar_btn_count
+
         if priority_widget and priority_widget in self.nav_list:
             self.nav_index = self.nav_list.index(priority_widget)
         elif self.nav_index >= len(self.nav_list):
             self.nav_index = 0
-        self.sync_visuals()
-
-    def rebuild_nav_map_library(self, grid_widget, priority_widget=None):
-        self.nav_list = []
-        for child in grid_widget.findChildren(QWidget):
-            if hasattr(child, 'game_id') and child.isVisible():
-                self.nav_list.append(child)
-        if priority_widget and priority_widget in self.nav_list:
-            self.nav_index = self.nav_list.index(priority_widget)
-        else:
-            self.nav_index = 0
-        self.sync_visuals()
-
-    def rebuild_nav_map_file_browser(self, browser, priority_widget=None):
-        self.nav_list = []
-        self.current_file_browser = browser
-        self._scan_widget_tree(browser)
-        if priority_widget and priority_widget in self.nav_list:
-            self.nav_index = self.nav_list.index(priority_widget)
-        else:
-            self.nav_index = 0
-        self.in_file_browser = True
-        self.sync_visuals()
-
-    def rebuild_nav_map_modal(self, modal):
-        self.nav_list = []
-        self._scan_widget_tree(modal)
-        self.nav_index = 0
         self.sync_visuals()
 
     def _scan_widget_tree(self, parent):
@@ -309,6 +326,8 @@ class UmuInputEngineQt:
                         self.nav_list.append(child)
             except RuntimeError:
                 pass
+
+    # ---- Actions -----------------------------------------------------------
 
     def press_current(self):
         if not self.nav_list:
@@ -337,6 +356,8 @@ class UmuInputEngineQt:
         elif self.on_screen_keyboard_open:
             self.on_screen_keyboard_open = False
             self.trigger_virtual_keyboard(show=False)
+
+    # ---- Visual sync -------------------------------------------------------
 
     def sync_visuals(self):
         if not self.nav_list:
@@ -391,9 +412,6 @@ class UmuInputEngineQt:
                 target.setFocus()
             except: pass
 
-        if self.current_file_browser and self.in_file_browser:
-            self.current_file_browser.scroll_to_selected(self.nav_index)
-
     def _apply_focus_style(self, widget, focused):
         try:
             if hasattr(widget, 'game_image') and widget.game_image is not None:
@@ -429,6 +447,8 @@ class UmuInputEngineQt:
         except RuntimeError:
             pass
 
+    # ---- Update loop -------------------------------------------------------
+
     def update(self):
         try:
             if not self.app._main_window or not self.app._main_window.isVisible():
@@ -441,72 +461,73 @@ class UmuInputEngineQt:
         self.refresh_hardware()
 
         now = time.time()
-        any_view_button_held = False
         cooldown_active = (now - self.last_input < self.cooldown)
-        button_cooldown_active = (now - self.last_input_button < self.button_cooldown)
+        button_cooldown_active = (now - self._last_input_button < self.button_cooldown)
 
         if self.on_screen_keyboard_open:
             for joy in self.joysticks:
                 if joy.get_button(1):
                     self.on_screen_keyboard_open = False
                     self.trigger_virtual_keyboard(show=False)
-                    self.last_input_button = time.time()
+                    self._last_input_button = time.time()
                     return
             return
 
         for joy in self.joysticks:
             try:
                 if joy.get_button(6):
-                    any_view_button_held = True
+                    if self.quit_hold_start == 0:
+                        self.quit_hold_start = now
+                        self.app.show_quit_progress(0)
+                    else:
+                        elapsed = now - self.quit_hold_start
+                        percent = min(elapsed / self.quit_duration, 1.0)
+                        self.app.show_quit_progress(percent)
+                        if elapsed >= self.quit_duration:
+                            self.app.close()
+                else:
+                    if self.quit_hold_start != 0:
+                        self.quit_hold_start = 0
+                        self.app.hide_quit_progress()
 
                 if self._controller_detected_at > 0 and (now - self._controller_detected_at) < 0.5:
                     return
 
                 if not button_cooldown_active:
-                    is_modal = self.in_file_browser or getattr(self.app, 'view_state', '') in ("browser", "modal")
-                    a_blocked = getattr(self.app, 'view_state', '') == "browser" and not self.in_file_browser
                     if joy.get_button(0):
-                        if not a_blocked:
-                            self.trigger_input(self.press_current)
-                            self.sound.play("confirm")
+                        self.trigger_input(self.press_current)
+                        self.sound.play("confirm")
                         return
                     elif joy.get_button(1):
-                        if self.in_file_browser and self.current_file_browser:
-                            self.trigger_input(self.current_file_browser._cancel)
-                        elif not is_modal:
+                        if self._nav_mode in ("file_browser", "modal") and self._modal_ref:
+                            self.trigger_input(self._modal_ref._cancel)
+                        else:
                             self.trigger_input(self.app.handle_back)
                         self.sound.play("back")
                         return
-                    if is_modal:
+
+                    if self._nav_mode in ("file_browser", "modal"):
                         pass
                     elif joy.get_button(4):
-                        if getattr(self.app, 'view_state', '') == "library":
+                        if self._nav_mode == "grid":
                             self.trigger_input(self.app.current_view().cycle_sort)
                             self.sound.play("confirm")
                         return
                     elif joy.get_button(5):
-                        if getattr(self.app, 'view_state', '') == "library":
+                        if self._nav_mode == "grid":
                             self.trigger_input(self.app.current_view().cycle_filter)
                             self.sound.play("confirm")
-                        elif self.rb_hold_start == 0:
-                            self.rb_hold_start = now
-                        elif (now - self.rb_hold_start) >= self.rb_hold_duration:
-                            if hasattr(self.app, 'volume_overlay'):
-                                self.app.volume_overlay.toggle()
-                            self.rb_hold_start = 0
                         return
-                    elif self.rb_hold_start > 0:
-                        self.rb_hold_start = 0
                     elif joy.get_button(2):
-                        if getattr(self.app, 'view_state', '') == "library" and getattr(self.app, 'current_game_id', None):
+                        if self._nav_mode == "grid" and getattr(self.app, 'current_game_id', None):
                             gid = self.app.current_game_id
                             self.trigger_input(lambda gid=gid: self.app.show_dashboard(gid))
-                        else:
+                        elif self._nav_mode == "list":
                             self.trigger_input(lambda: self.app.show_editor() if getattr(self.app, 'current_game_id', None) else None)
                         self.sound.play("confirm")
                         return
                     elif joy.get_button(3):
-                        vs = getattr(self.app, 'view_state', '')
+                        vs = self.app.view_state
                         if vs == "settings":
                             self.trigger_input(self.app.save_game)
                         elif vs == "dashboard":
@@ -551,18 +572,6 @@ class UmuInputEngineQt:
                     elif abs(ax1) < 0.3:
                         self._axes_armed[1] = True
 
-                vol_overlay = getattr(self.app, 'volume_overlay', None)
-                if vol_overlay and vol_overlay.visible:
-                    rstick_x = joy.get_axis(3)
-                    if abs(rstick_x) > 0.5:
-                        vol_overlay.adjust(5 if rstick_x > 0 else -5)
-                        self.last_input = now
-                        return
-                    if move_x != 0:
-                        vol_overlay.adjust(5 if move_x > 0 else -5)
-                        self.last_input = now
-                        return
-
                 if (move_x != 0 or move_y != 0) and not cooldown_active:
                     self.last_input = now
                     num_widgets = len(self.nav_list)
@@ -570,9 +579,10 @@ class UmuInputEngineQt:
                     if num_widgets == 0:
                         return
 
-                    if self.in_file_browser:
-                        header_count = getattr(self.current_file_browser, 'header_count', 3)
-                        cols = getattr(self.current_file_browser, 'num_cols', 4)
+                    if self._nav_mode == "file_browser":
+                        fb = self._modal_ref
+                        header_count = getattr(fb, 'header_count', 2) if fb else 2
+                        cols = getattr(fb, 'num_cols', 4) if fb else 4
                         if self.nav_index < header_count:
                             if move_x != 0:
                                 new_index = (self.nav_index + move_x) % header_count
@@ -593,26 +603,64 @@ class UmuInputEngineQt:
                                     new_index = header_count + new_grid_idx
                                 else:
                                     new_index = self.nav_index
-                    elif getattr(self.app, 'view_state', '') == "sidebar":
-                        sb_count = len(getattr(self.app, 'nav_widgets', []))
-                        if move_y != 0:
-                            new_index = (self.nav_index + move_y) % sb_count
-                        else:
-                            new_index = self.nav_index
-                    elif getattr(self.app, 'view_state', '') == "library":
-                        cols = 5
+                    elif self._nav_mode == "grid":
+                        view = self.app.current_view()
+                        cols = getattr(view, 'num_cols', 5)
                         step = 5 if self.fast_scroll_active else 1
-                        if move_x != 0:
-                            if self.fast_scroll_active:
-                                new_index = (self.nav_index + (move_x * step * cols)) % num_widgets
+                        sidebar_offset = getattr(self, '_sidebar_btn_count', 0)
+                        grid_count = num_widgets - sidebar_offset
+                        if self.nav_index < sidebar_offset:
+                            if move_y != 0:
+                                new_index = (self.nav_index + move_y) % sidebar_offset
+                            elif move_x != 0:
+                                cur = self.nav_list[self.nav_index]
+                                cur_geo = cur.geometry()
+                                cur_rx = cur.mapToGlobal(cur_geo.topLeft()).x()
+                                cur_cy = cur.mapToGlobal(cur_geo.topLeft()).y() + cur_geo.height() / 2.0
+                                best_idx = None
+                                best_dist = float('inf')
+                                for i in range(sidebar_offset):
+                                    if i == self.nav_index or not self._is_valid(self.nav_list[i]):
+                                        continue
+                                    w = self.nav_list[i]
+                                    w_geo = w.geometry()
+                                    wx = w.mapToGlobal(w_geo.topLeft()).x()
+                                    if (move_x > 0 and wx <= cur_rx) or (move_x < 0 and wx >= cur_rx):
+                                        continue
+                                    w_cy = w.mapToGlobal(w_geo.topLeft()).y() + w_geo.height() / 2.0
+                                    y_dist = abs(w_cy - cur_cy)
+                                    x_dist = abs(wx - cur_rx)
+                                    score = y_dist * 2 + x_dist
+                                    if score < best_dist:
+                                        best_dist = score
+                                        best_idx = i
+                                new_index = best_idx if best_idx is not None else self.nav_index
                             else:
-                                new_index = (self.nav_index + move_x) % num_widgets
-                        elif move_y != 0:
-                            new_index = self.nav_index + (move_y * step * cols)
-                            if new_index < 0:
                                 new_index = self.nav_index
-                            elif new_index >= num_widgets:
-                                new_index = self.nav_index
+                        else:
+                            rel_idx = self.nav_index - sidebar_offset
+                            if move_x != 0:
+                                if self.fast_scroll_active:
+                                    new_rel = (rel_idx + (move_x * step * cols)) % grid_count
+                                else:
+                                    new_rel = (rel_idx + move_x) % grid_count
+                                new_index = sidebar_offset + new_rel
+                            elif move_y != 0:
+                                new_rel = rel_idx + (move_y * step * cols)
+                                if new_rel < 0:
+                                    if sidebar_offset > 0:
+                                        new_index = sidebar_offset - 1
+                                    else:
+                                        new_index = self.nav_index
+                                elif new_rel >= grid_count:
+                                    new_index = self.nav_index
+                                else:
+                                    new_index = sidebar_offset + new_rel
+                    elif self._nav_mode == "modal":
+                        if move_x != 0 or move_y != 0:
+                            new_index = (self.nav_index + (move_x or move_y)) % num_widgets
+                        if self._modal_ref and hasattr(self._modal_ref, 'scroll_to_selected'):
+                            self._modal_ref.scroll_to_selected(new_index)
                     else:
                         if move_x != 0:
                             cur = self.nav_list[self.nav_index]
@@ -645,9 +693,9 @@ class UmuInputEngineQt:
                     if 0 <= new_index < num_widgets and new_index != self.nav_index:
                         self.nav_index = new_index
                         self.sync_visuals()
-                        if self.in_file_browser and self.current_file_browser:
-                            self.current_file_browser.scroll_to_selected(self.nav_index)
-                        if getattr(self.app, 'view_state', '') == "library":
+                        if self._nav_mode == "file_browser" and self._modal_ref:
+                            self._modal_ref.scroll_to_selected(self.nav_index)
+                        if self._nav_mode == "grid":
                             self.app.scroll_to_library_item(self.nav_index)
                         return
 
@@ -656,23 +704,8 @@ class UmuInputEngineQt:
                     joy.close()
                     self.joysticks.remove(joy)
 
-        if any_view_button_held:
-            if self.quit_hold_start == 0:
-                self.quit_hold_start = now
-                self.app.show_quit_progress(0)
-            else:
-                elapsed = now - self.quit_hold_start
-                percent = min(elapsed / self.quit_duration, 1.0)
-                self.app.show_quit_progress(percent)
-                if elapsed >= self.quit_duration:
-                    self.app.close()
-        else:
-            if self.quit_hold_start != 0:
-                self.quit_hold_start = 0
-                self.app.hide_quit_progress()
-
     def trigger_input(self, func):
-        self.last_input_button = time.time()
+        self._last_input_button = time.time()
         func()
 
     def trigger_virtual_keyboard(self, show=True):
@@ -684,19 +717,4 @@ class UmuInputEngineQt:
         except: pass
 
     def _toggle_sidebar(self):
-        if getattr(self.app, 'view_state', '') == "sidebar":
-            prev = self._sidebar_prev_state or 'library'
-            self.app.view_state = prev
-            if prev == "library":
-                view = self.app.current_view()
-                if view and hasattr(view, 'grid'):
-                    self.rebuild_nav_map_library(view.grid)
-            else:
-                self.rebuild_nav_map()
-            self.nav_index = self._sidebar_prev_nav_index
-            self.sync_visuals()
-        else:
-            self._sidebar_prev_state = getattr(self.app, 'view_state', '')
-            self._sidebar_prev_nav_index = self.nav_index
-            self.app.view_state = "sidebar"
-            self.rebuild_nav_map(include_sidebar=True, priority_widget=getattr(self.app, 'library_btn', None))
+        self.app._toggle_sidebar_visibility()

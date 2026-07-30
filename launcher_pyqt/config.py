@@ -2,7 +2,7 @@ import os
 import json
 import pathlib
 import time
-import shutil
+
 import sys; sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import colors as c
 

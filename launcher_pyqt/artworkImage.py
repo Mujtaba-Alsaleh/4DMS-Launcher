@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 from PyQt6.QtWidgets import QLabel
 from PyQt6.QtGui import QPixmap, QMovie
 from PyQt6.QtCore import QSize, Qt
@@ -11,7 +10,6 @@ class GameImage(QLabel):
         self.original_path = file_path
         self._width = width
         self._height = height
-        self.quality = quality
         self.is_playing = False
         self._movie = None
         self._pixmap = None
@@ -57,18 +55,3 @@ class GameImage(QLabel):
 
     def lower_widget(self):
         self.lower()
-
-    def resize_to_parent(self):
-        parent = self.parent()
-        if parent:
-            pw = parent.width()
-            ph = parent.height()
-            if pw > 1 and ph > 1:
-                self._width = pw
-                self._height = ph
-                self.setFixedSize(pw, ph)
-                if self._movie:
-                    self._movie.setScaledSize(QSize(pw, ph))
-                elif self._pixmap:
-                    self._pixmap = QPixmap(self.original_path).scaled(pw, ph)
-                    self.setPixmap(self._pixmap)

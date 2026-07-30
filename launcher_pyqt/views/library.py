@@ -1,7 +1,7 @@
 import time, os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QScrollArea, QGridLayout)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QPainterPath
 from launcher_pyqt.artworkImage import GameImage
 from launcher_pyqt.utils import format_playtime, relative_time
@@ -78,9 +78,17 @@ class LibraryView(QWidget):
         self.sort_mode = "Last Played"
         self.filter_mode = "All"
         self.grid = None
+        self._scroll_area = None
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
+        self._first_show = False
         self._build()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self._first_show:
+            self._first_show = True
+            QTimer.singleShot(30, self._rebuild)
 
     def _get_sorted_games(self):
         games = [(g_id, data) for g_id, data in self.app.config_data.items() if g_id != "settings"]
@@ -118,19 +126,20 @@ class LibraryView(QWidget):
             empty.setStyleSheet(f"color: {c.TXT_DIM}; font: 16px;")
             self._layout.addWidget(empty)
             if self.app.engine:
-                self.app.engine.rebuild_nav_map()
+                QTimer.singleShot(0, self.app.engine.rescan)
             return
 
         if not self.app.current_game_id and games:
             self.app.current_game_id = games[0][0]
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         scroll_inner = QWidget()
         scroll_inner.setStyleSheet("background: transparent;")
         scroll_layout = QVBoxLayout(scroll_inner)
         scroll_layout.setContentsMargins(20, 10, 20, 20)
+        scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         recent_games = []
         if self.sort_mode == "Last Played" and self.filter_mode == "All":
@@ -142,8 +151,8 @@ class LibraryView(QWidget):
             scroll_layout.addWidget(recent_lbl)
 
             recent_row = QHBoxLayout()
-            recent_row.setSpacing(8)
-            rp_w = 110
+            recent_row.setSpacing(4)
+            rp_w = 80
             rp_h = int(rp_w * 1.43)
             for g_id, data in recent_games:
                 card = QWidget()
@@ -159,7 +168,7 @@ class LibraryView(QWidget):
                 card_layout.addWidget(poster)
 
                 name_lbl = QLabel(data.get('name', '').upper())
-                name_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 10px;")
+                name_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 8px;")
                 name_lbl.setWordWrap(True)
                 name_lbl.setFixedWidth(rp_w)
                 card_layout.addWidget(name_lbl)
@@ -167,22 +176,26 @@ class LibraryView(QWidget):
                 rt = relative_time(data.get('last_played'))
                 if rt:
                     time_lbl = QLabel(rt)
-                    time_lbl.setStyleSheet(f"color: {c.TXT_DIM}; font: 9px;")
+                    time_lbl.setStyleSheet(f"color: {c.TXT_DIM}; font: 7px;")
                     card_layout.addWidget(time_lbl)
 
                 recent_row.addWidget(card)
             recent_row_w = QWidget()
             recent_row_w.setLayout(recent_row)
             scroll_layout.addWidget(recent_row_w)
-            scroll_layout.addSpacing(16)
+            scroll_layout.addSpacing(10)
 
         self.grid = QWidget()
         self.grid.setStyleSheet("background: transparent;")
         grid_layout = QGridLayout(self.grid)
-        grid_layout.setSpacing(20)
-        num_cols = 5
-        poster_w = 170
-        poster_h = 238
+        grid_layout.setSpacing(12)
+        sidebar_w = 280 if self.app._sidebar.isVisible() else 0
+        avail = max(400, self.app._content_area.width() - sidebar_w - 40)
+        spacing = 12
+        poster_w = min(170, max(130, (avail - spacing * 3) // 5))
+        self.num_cols = max(2, (avail + spacing) // (poster_w + spacing))
+        num_cols = self.num_cols
+        poster_h = int(poster_w * 1.4)
 
         for i, (g_id, data) in enumerate(games):
             card = QWidget()
@@ -213,15 +226,20 @@ class LibraryView(QWidget):
             grid_layout.addWidget(card, i // num_cols, i % num_cols)
 
         scroll_layout.addWidget(self.grid)
-        scroll.setWidget(scroll_inner)
-        self._layout.addWidget(scroll)
+        self._scroll_area.setWidget(scroll_inner)
+        self._layout.addWidget(self._scroll_area)
+
+        if self.app.engine:
+            QTimer.singleShot(0, self.app.engine.rescan)
 
     def _quick_launch(self, game_id):
         self.app.current_game_id = game_id
         self.app.game_process_manager.try_launch()
 
     def scroll_to_item(self, index):
-        pass
+        if self._scroll_area and self.app.engine and 0 <= index < len(self.app.engine.nav_list):
+            target = self.app.engine.nav_list[index]
+            self._scroll_area.ensureWidgetVisible(target, 100, 100)
 
     def cycle_sort(self):
         idx = SORT_OPTIONS.index(self.sort_mode) if self.sort_mode in SORT_OPTIONS else 0
@@ -247,8 +265,9 @@ class LibraryView(QWidget):
         self._rebuild()
 
     def _rebuild(self):
-        for i in reversed(range(self._layout.count())):
-            w = self._layout.itemAt(i).widget()
+        while self._layout.count():
+            item = self._layout.takeAt(0)
+            w = item.widget()
             if w:
                 w.deleteLater()
         self._build()

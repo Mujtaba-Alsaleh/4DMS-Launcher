@@ -13,7 +13,6 @@ class GameProcessManager:
         self.current_running_game_id = None
         self.launch_lock = False
         self.launch_lock_cooldown = 2000
-        self.livesplit = ls.LiveSplitManager()
 
     def try_launch(self):
         if self.is_playing:
@@ -42,13 +41,16 @@ class GameProcessManager:
         self.launch_lock = True
 
         def _update_play_btn():
-            if self.app.play_btn and self.app.play_btn.isVisible():
-                self.app.play_btn.setText("STOP")
-                self.app.play_btn.setStyleSheet(f"""
-                    QPushButton {{ background: #e74c3c; color: white; font: bold 16px;
-                                   border-radius: 8px; }}
-                    QPushButton:hover {{ background: #c0392b; }}
-                """)
+            try:
+                if self.app.play_btn and self.app.play_btn.isVisible():
+                    self.app.play_btn.setText("STOP")
+                    self.app.play_btn.setStyleSheet(f"""
+                        QPushButton {{ background: #e74c3c; color: white; font: bold 16px;
+                                       border-radius: 8px; }}
+                        QPushButton:hover {{ background: #c0392b; }}
+                    """)
+            except RuntimeError:
+                pass
         QTimer.singleShot(0, _update_play_btn)
         threading.Thread(target=self._run_process, daemon=True).start()
         QTimer.singleShot(self.launch_lock_cooldown, self._release_lock)
@@ -104,7 +106,7 @@ class GameProcessManager:
                     self.game_process.wait(timeout=1)
                 except subprocess.TimeoutExpired:
                     pass
-        self.livesplit.stop()
+        self.app.livesplit.stop()
         self.game_process = None
         self.is_playing = False
         self._reset_ui()
@@ -155,7 +157,7 @@ class GameProcessManager:
             self.app.config_manager.save_data(self.app.config_data)
 
             if data.get('livesplit', False) and ls.LiveSplitManager.is_installed():
-                self.livesplit.launch(data['prefix'], p_path)
+                self.app.livesplit.launch(data['prefix'], p_path)
                 threading.Thread(target=self._connect_livesplit, daemon=True).start()
 
             QTimer.singleShot(500, self.app.showMinimized)
@@ -168,8 +170,8 @@ class GameProcessManager:
             end_time = time.time()
             duration = round((end_time - start_time) / 60, 2)
 
-            self.livesplit.stop_hotkeys()
-            self.livesplit.disconnect()
+            self.app.livesplit.stop_hotkeys()
+            self.app.livesplit.disconnect()
 
             if self.current_running_game_id:
                 rgid = self.current_running_game_id
@@ -203,9 +205,9 @@ class GameProcessManager:
         for attempt in range(12):
             if not self.is_playing:
                 return
-            if self.livesplit.process and self.livesplit.process.poll() is not None:
+            if self.app.livesplit.process and self.app.livesplit.process.poll() is not None:
                 return
             time.sleep(5)
-            if self.livesplit.connect():
-                self.livesplit.launch_hotkey_listener()
+            if self.app.livesplit.connect():
+                self.app.livesplit.launch_hotkey_listener()
                 return

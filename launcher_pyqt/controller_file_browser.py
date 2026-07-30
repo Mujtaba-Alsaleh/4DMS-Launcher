@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QScrollArea, QWidget, QGridLayout)
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QCursor
 from launcher_pyqt.controller_confirm_modal import ControllerConfirmModal
 import colors as c
@@ -16,10 +16,14 @@ class ControllerFileBrowser(QDialog):
         self.current_path = os.path.expanduser("~")
         self.engine = engine
         self.num_cols = 4
+        self.header_count = 2 if is_file else 4
         self.allowed_file_extensions = (".jpg", ".png", ".webp", ".jpeg") if is_art else (".exe", ".sh")
 
         self.setWindowTitle("Select Path")
         self.resize(1000, 700)
+
+        if self.engine:
+            self.finished.connect(lambda: QTimer.singleShot(0, self.engine.rescan))
 
         self._build_ui()
 
@@ -28,7 +32,6 @@ class ControllerFileBrowser(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
 
-        # Path bar
         path_frame = QWidget()
         path_frame.setStyleSheet(f"background: {c.BG_INPUT}; border-radius: 6px;")
         path_row = QHBoxLayout(path_frame)
@@ -42,7 +45,6 @@ class ControllerFileBrowser(QDialog):
         path_row.addWidget(self._path_label, 1)
         layout.addWidget(path_frame)
 
-        # Toolbar
         toolbar = QHBoxLayout()
         toolbar.setSpacing(6)
 
@@ -87,7 +89,6 @@ class ControllerFileBrowser(QDialog):
         toolbar.addWidget(cancel_btn)
         layout.addLayout(toolbar)
 
-        # Scroll area
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet(f"""
@@ -112,6 +113,11 @@ class ControllerFileBrowser(QDialog):
         inner_layout.addStretch()
 
         self._populate()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.engine:
+            QTimer.singleShot(0, self.engine.rescan)
 
     def _populate(self):
         self._clear_grid()
@@ -157,7 +163,7 @@ class ControllerFileBrowser(QDialog):
             self._grid_layout.addWidget(btn, idx // num_cols, idx % num_cols)
 
         if self.engine:
-            self.engine.rebuild_nav_map_file_browser(self)
+            QTimer.singleShot(0, self.engine.rescan)
 
     def _clear_grid(self):
         while self._grid_layout.count():
@@ -187,28 +193,24 @@ class ControllerFileBrowser(QDialog):
         else:
             self._finish(new_path)
 
-    def _cleanup(self):
-        if self.engine:
-            self.engine.in_file_browser = False
-            self.engine.rebuild_nav_map()
-
     def _finish(self, path):
         if self.callback:
             self.callback(path)
-        self._cleanup()
         self.accept()
 
     def _cancel(self):
-        self._cleanup()
         self.reject()
 
     def closeEvent(self, event):
-        self._cleanup()
         event.accept()
 
     def scroll_to_selected(self, selected_index):
+        """Scroll the scroll area to keep the selected item visible."""
         sb = self.scroll.verticalScrollBar()
-        sb.setValue(int(selected_index / self.num_cols) * 90)
+        if self._grid_layout.count() == 0:
+            return
+        row = selected_index // self.num_cols
+        sb.setValue(row * 90)
 
     def _create_directory(self):
         path = os.path.join(self.current_path, "pfx")
@@ -217,8 +219,6 @@ class ControllerFileBrowser(QDialog):
         self._populate()
 
     def _on_user_decision(self, confirmed):
-        if self.engine:
-            self.engine.rebuild_nav_map_file_browser(self)
         if confirmed:
             self._create_directory()
 
