@@ -55,6 +55,14 @@ class GameProcessManager:
         threading.Thread(target=self._run_process, daemon=True).start()
         QTimer.singleShot(self.launch_lock_cooldown, self._release_lock)
 
+    def _refresh_library_badges(self):
+        view = self.app._views.get('library') if hasattr(self.app, '_views') else None
+        if view and hasattr(view, '_update_running_badges'):
+            try:
+                view._update_running_badges()
+            except RuntimeError:
+                pass
+
     def _release_lock(self):
         self.launch_lock = False
 
@@ -109,7 +117,9 @@ class GameProcessManager:
         self.app.livesplit.stop()
         self.game_process = None
         self.is_playing = False
+        self.current_running_game_id = None
         self._reset_ui()
+        QTimer.singleShot(0, self._refresh_library_badges)
 
     def _run_process(self):
         start_time = time.time()
@@ -150,6 +160,7 @@ class GameProcessManager:
             self.game_process = subprocess.Popen(cmd, env=env, cwd=exe_dir,
                                                   preexec_fn=os.setsid if sys.platform.startswith('linux') else None)
             self.current_running_game_id = g_id
+            QTimer.singleShot(0, self._refresh_library_badges)
 
             data["last_played"] = str(time.time())
             data["launch_count"] = data.get("launch_count", 0) + 1

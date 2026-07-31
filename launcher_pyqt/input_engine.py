@@ -2,10 +2,24 @@ import os, sys, time, struct, fcntl, glob, subprocess
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtWidgets import QWidget, QPushButton, QLineEdit, QCheckBox, QComboBox, QApplication
+from PyQt6.QtCore import QTimer, Qt, QObject, QEvent
+from PyQt6.QtWidgets import (QWidget, QPushButton, QLineEdit, QTextEdit,
+                             QPlainTextEdit, QCheckBox, QComboBox, QApplication)
 
 import colors as c
+
+
+class HoverFilter(QObject):
+    """Mouse hover follows the controller nav cursor (K/M visual parity)."""
+
+    def __init__(self, engine):
+        super().__init__()
+        self._engine = engine
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Enter and isinstance(obj, QWidget):
+            self._engine.hover_widget(obj)
+        return False
 
 
 # ---- Sound (no SDL, no pygame) -------------------------------------------
@@ -217,17 +231,73 @@ class UmuInputEngineQt:
         self.rb_hold_start = 0
         self.rb_hold_duration = 0.5
 
-        self.on_screen_keyboard_open = False
-
         self._nav_mode = "none"
         self._modal_ref = None
         self._btn_prev = {}
+        self._prev_focus_target = None
+        self._nav_index_before_osk = 0
 
         self.sound = SoundManager()
+        self.sound.play("launch")
 
         self._timer = QTimer()
         self._timer.timeout.connect(self.update)
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
+
+        try:
+            QApplication.instance().focusChanged.connect(self._on_focus_changed)
+        except Exception:
+            pass
+        self._hover_filter = HoverFilter(self)
+        QApplication.instance().installEventFilter(self._hover_filter)
+
+    def hover_widget(self, widget):
+        try:
+            if self._nav_mode == "none" or QApplication.activeModalWidget():
+                return
+            w = widget
+            while w is not None:
+                if isinstance(w, (QLineEdit, QComboBox, QCheckBox)):
+                    return
+                if w in self.nav_list:
+                    idx = self.nav_list.index(w)
+                    if idx != self.nav_index:
+                        self.nav_index = idx
+                        self.sync_visuals()
+                    return
+                w = w.parentWidget()
+        except (RuntimeError, TypeError):
+            pass
+
+    def _on_focus_changed(self, old, new):
+        try:
+            if not new:
+                return
+            osk = getattr(self.app, 'on_screen_keyboard', None)
+            osk_open = osk is not None and osk.isVisible()
+            if isinstance(new, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                if osk_open and osk is not None:
+                    osk._last_target = new
+                if QApplication.mouseButtons() and not osk_open:
+                    self.open_keyboard()
+                    return
+            elif osk_open and not getattr(new, 'osk_key', False) and not isinstance(
+                    new, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                self.close_keyboard()
+                return
+            if self._nav_mode == "none" or QApplication.activeModalWidget():
+                return
+            w = new
+            while w is not None:
+                if w in self.nav_list:
+                    idx = self.nav_list.index(w)
+                    if idx != self.nav_index:
+                        self.nav_index = idx
+                        self.sync_visuals()
+                    return
+                w = w.parentWidget()
+        except (RuntimeError, TypeError):
+            pass
 
     def start(self):
         self._timer.start(20)
@@ -256,6 +326,12 @@ class UmuInputEngineQt:
     # ---- Nav state machine -------------------------------------------------
 
     def _determine_mode(self):
+        osk = getattr(self.app, 'on_screen_keyboard', None)
+        try:
+            if osk is not None and osk.isVisible():
+                return "keyboard", osk
+        except RuntimeError:
+            pass
         modal = None
         try:
             modal = QApplication.activeModalWidget()
@@ -299,6 +375,9 @@ class UmuInputEngineQt:
             if view:
                 self._scan_widget_tree(view)
 
+        elif mode == "keyboard":
+            self._scan_widget_tree(modal)
+
         elif mode == "file_browser":
             self._scan_widget_tree(modal)
 
@@ -310,7 +389,7 @@ class UmuInputEngineQt:
             sidebar_nav = [btn for btn in self.app.nav_widgets
                            if btn.isVisible() and btn.isEnabled()]
             sidebar_btn_count = len(sidebar_nav)
-            self.nav_list = sidebar_nav
+            self.nav_list = sidebar_nav + self.nav_list
         self._sidebar_btn_count = sidebar_btn_count
 
         if priority_widget and priority_widget in self.nav_list:
@@ -322,7 +401,7 @@ class UmuInputEngineQt:
     def _scan_widget_tree(self, parent):
         for child in parent.findChildren(QWidget):
             try:
-                if isinstance(child, NAV_TYPES) and child.isEnabled():
+                if isinstance(child, NAV_TYPES) and child.isEnabled() and child.isVisible():
                     if child not in self.nav_list:
                         self.nav_list.append(child)
             except RuntimeError:
@@ -348,25 +427,49 @@ class UmuInputEngineQt:
         elif isinstance(target, QPushButton):
             target.animateClick()
             return
-        elif isinstance(target, QLineEdit):
+        elif hasattr(target, 'game_id'):
+            self.app.try_launch_game()
+            return
+        elif isinstance(target, (QLineEdit, QTextEdit, QPlainTextEdit)):
             target.setFocus()
             target.selectAll()
-            if not self.on_screen_keyboard_open:
-                self.on_screen_keyboard_open = True
-                self.trigger_virtual_keyboard(show=True)
-        elif self.on_screen_keyboard_open:
-            self.on_screen_keyboard_open = False
-            self.trigger_virtual_keyboard(show=False)
+            osk = getattr(self.app, 'on_screen_keyboard', None)
+            if osk is not None and osk.isVisible():
+                self.close_keyboard()
+            else:
+                self.open_keyboard()
 
     # ---- Visual sync -------------------------------------------------------
 
+    def _clear_focus(self, widget):
+        if widget is None:
+            return
+        try:
+            if hasattr(widget, 'set_focused'):
+                widget.set_focused(False)
+            if hasattr(widget, 'game_image') and widget.game_image is not None:
+                widget.game_image.stop()
+                widget.game_image.hide()
+            base = getattr(widget, '_nav_base_style', None)
+            if base is not None:
+                widget.setStyleSheet(base)
+        except (RuntimeError, TypeError):
+            pass
+
     def sync_visuals(self):
+        prev_focus = getattr(self, '_prev_focus_target', None)
         if not self.nav_list:
+            if prev_focus is not None:
+                self._clear_focus(prev_focus)
+                self._prev_focus_target = None
             self.nav_index = 0
             return
         if self.nav_index >= len(self.nav_list):
             self.nav_index = 0
         target = self.nav_list[self.nav_index]
+        if prev_focus is not None and prev_focus is not target and prev_focus not in self.nav_list:
+            self._clear_focus(prev_focus)
+        self._prev_focus_target = target
         view_state = getattr(self.app, 'view_state', '')
 
         if view_state == "library":
@@ -410,8 +513,14 @@ class UmuInputEngineQt:
 
         if self._is_valid(target):
             try:
-                target.setFocus()
-            except: pass
+                if self._nav_mode == "keyboard":
+                    fw = QApplication.focusWidget()
+                    if not isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                        target.setFocus()
+                else:
+                    target.setFocus()
+            except Exception:
+                pass
 
     def _apply_focus_style(self, widget, focused):
         try:
@@ -420,7 +529,7 @@ class UmuInputEngineQt:
             base = getattr(widget, '_nav_base_style', None)
             current = widget.styleSheet()
             if focused:
-                if base is None or current != base:
+                if base is None:
                     base = current
                     widget._nav_base_style = base
                 focus_extra = ""
@@ -443,7 +552,7 @@ class UmuInputEngineQt:
                     """
                 widget.setStyleSheet(base + focus_extra)
             else:
-                if base is not None:
+                if base is not None and current != base:
                     widget.setStyleSheet(base)
         except RuntimeError:
             pass
@@ -464,15 +573,6 @@ class UmuInputEngineQt:
         now = time.time()
         cooldown_active = (now - self.last_input < self.cooldown)
         button_cooldown_active = (now - self._last_input_button < self.button_cooldown)
-
-        if self.on_screen_keyboard_open:
-            for joy in self.joysticks:
-                if joy.get_button(1):
-                    self.on_screen_keyboard_open = False
-                    self.trigger_virtual_keyboard(show=False)
-                    self._last_input_button = time.time()
-                    return
-            return
 
         for joy in self.joysticks:
             try:
@@ -504,17 +604,20 @@ class UmuInputEngineQt:
 
                     if rising(0):
                         self.trigger_input(self.press_current)
-                        self.sound.play("confirm")
+                        if self._nav_mode != "keyboard":
+                            self.sound.play("confirm")
                         return
                     elif rising(1):
-                        if self._nav_mode in ("file_browser", "modal") and self._modal_ref:
+                        if self._nav_mode == "keyboard":
+                            self.trigger_input(self.close_keyboard)
+                        elif self._nav_mode in ("file_browser", "modal") and self._modal_ref:
                             self.trigger_input(self._modal_ref._cancel)
                         else:
                             self.trigger_input(self.app.handle_back)
                         self.sound.play("back")
                         return
 
-                    if self._nav_mode in ("file_browser", "modal"):
+                    if self._nav_mode in ("file_browser", "modal", "keyboard"):
                         pass
                     elif rising(4):
                         if self._nav_mode == "grid":
@@ -581,155 +684,221 @@ class UmuInputEngineQt:
                         self._axes_armed[1] = True
 
                 if (move_x != 0 or move_y != 0) and not cooldown_active:
-                    self.last_input = now
-                    num_widgets = len(self.nav_list)
-                    new_index = self.nav_index
-                    self.sound.play("move")
-                    if num_widgets == 0:
-                        return
-
-                    if self._nav_mode == "file_browser":
-                        fb = self._modal_ref
-                        header_count = getattr(fb, 'header_count', 2) if fb else 2
-                        cols = getattr(fb, 'num_cols', 4) if fb else 4
-                        if self.nav_index < header_count:
-                            if move_x != 0:
-                                new_index = (self.nav_index + move_x) % header_count
-                            elif move_y == 1:
-                                new_index = header_count
-                            elif move_y == -1:
-                                new_index = self.nav_index
-                            else:
-                                new_index = self.nav_index
-                        else:
-                            grid_idx = self.nav_index - header_count
-                            if move_x != 0:
-                                new_grid_idx = (grid_idx + move_x) % (num_widgets - header_count)
-                                new_index = header_count + new_grid_idx
-                            elif move_y != 0:
-                                new_grid_idx = grid_idx + (move_y * cols)
-                                if new_grid_idx < 0:
-                                    new_index = 0
-                                elif new_grid_idx < (num_widgets - header_count):
-                                    new_index = header_count + new_grid_idx
-                                else:
-                                    new_index = self.nav_index
-                            else:
-                                new_index = self.nav_index
-                    elif self._nav_mode == "grid":
-                        view = self.app.current_view()
-                        cols = getattr(view, 'num_cols', 5)
-                        step = 5 if self.fast_scroll_active else 1
-                        sidebar_offset = getattr(self, '_sidebar_btn_count', 0)
-                        grid_count = num_widgets - sidebar_offset
-                        if self.nav_index < sidebar_offset:
-                            if move_y != 0:
-                                new_index = (self.nav_index + move_y) % sidebar_offset
-                            elif move_x != 0:
-                                cur = self.nav_list[self.nav_index]
-                                cur_geo = cur.geometry()
-                                cur_rx = cur.mapToGlobal(cur_geo.topLeft()).x()
-                                cur_cy = cur.mapToGlobal(cur_geo.topLeft()).y() + cur_geo.height() / 2.0
-                                best_idx = None
-                                best_dist = float('inf')
-                                for i in range(sidebar_offset):
-                                    if i == self.nav_index or not self._is_valid(self.nav_list[i]):
-                                        continue
-                                    w = self.nav_list[i]
-                                    w_geo = w.geometry()
-                                    wx = w.mapToGlobal(w_geo.topLeft()).x()
-                                    if (move_x > 0 and wx <= cur_rx) or (move_x < 0 and wx >= cur_rx):
-                                        continue
-                                    w_cy = w.mapToGlobal(w_geo.topLeft()).y() + w_geo.height() / 2.0
-                                    y_dist = abs(w_cy - cur_cy)
-                                    x_dist = abs(wx - cur_rx)
-                                    score = y_dist * 2 + x_dist
-                                    if score < best_dist:
-                                        best_dist = score
-                                        best_idx = i
-                                new_index = best_idx if best_idx is not None else self.nav_index
-                            else:
-                                new_index = self.nav_index
-                        else:
-                            rel_idx = self.nav_index - sidebar_offset
-                            if move_x != 0:
-                                if self.fast_scroll_active:
-                                    new_rel = (rel_idx + (move_x * step * cols)) % grid_count
-                                else:
-                                    new_rel = (rel_idx + move_x) % grid_count
-                                new_index = sidebar_offset + new_rel
-                            elif move_y != 0:
-                                new_rel = rel_idx + (move_y * step * cols)
-                                if new_rel < 0:
-                                    if sidebar_offset > 0:
-                                        new_index = sidebar_offset - 1
-                                    else:
-                                        new_index = self.nav_index
-                                elif new_rel >= grid_count:
-                                    new_index = self.nav_index
-                                else:
-                                    new_index = sidebar_offset + new_rel
-                    elif self._nav_mode == "modal":
-                        if move_x != 0 or move_y != 0:
-                            new_index = (self.nav_index + (move_x or move_y)) % num_widgets
-                        else:
-                            new_index = self.nav_index
-                        if self._modal_ref and hasattr(self._modal_ref, 'scroll_to_selected'):
-                            self._modal_ref.scroll_to_selected(new_index)
-                    else:
-                        if move_x != 0:
-                            cur = self.nav_list[self.nav_index]
-                            if self._is_valid(cur):
-                                cur_geo = cur.geometry()
-                                cur_rx = cur.mapToGlobal(cur_geo.topLeft()).x()
-                                cur_cy = cur.mapToGlobal(cur_geo.topLeft()).y() + cur_geo.height() / 2.0
-                                best_idx = None
-                                best_dist = float('inf')
-                                for i, w in enumerate(self.nav_list):
-                                    if i == self.nav_index or not self._is_valid(w):
-                                        continue
-                                    w_geo = w.geometry()
-                                    wx = w.mapToGlobal(w_geo.topLeft()).x()
-                                    if (move_x > 0 and wx <= cur_rx) or (move_x < 0 and wx >= cur_rx):
-                                        continue
-                                    w_cy = w.mapToGlobal(w_geo.topLeft()).y() + w_geo.height() / 2.0
-                                    y_dist = abs(w_cy - cur_cy)
-                                    x_dist = abs(wx - cur_rx)
-                                    score = y_dist * 2 + x_dist
-                                    if score < best_dist:
-                                        best_dist = score
-                                        best_idx = i
-                                new_index = best_idx if best_idx is not None else self.nav_index
-                        elif move_y != 0:
-                            new_index = (self.nav_index + move_y) % num_widgets
-                        else:
-                            new_index = self.nav_index
-
-                    if 0 <= new_index < num_widgets and new_index != self.nav_index:
-                        self.nav_index = new_index
-                        self.sync_visuals()
-                        if self._nav_mode == "file_browser" and self._modal_ref:
-                            self._modal_ref.scroll_to_selected(self.nav_index)
-                        if self._nav_mode == "grid":
-                            self.app.scroll_to_library_item(self.nav_index)
-                        return
+                    self._move_selection(move_x, move_y)
 
             except (OSError, IOError):
                 if joy in self.joysticks:
                     joy.close()
                     self.joysticks.remove(joy)
 
+    def _move_selection(self, move_x, move_y):
+        self.last_input = time.time()
+        num_widgets = len(self.nav_list)
+        new_index = self.nav_index
+        self.sound.play("move")
+        if num_widgets == 0:
+            return
+
+        if self._nav_mode == "file_browser":
+            fb = self._modal_ref
+            header_count = getattr(fb, 'header_count', 2) if fb else 2
+            cols = getattr(fb, 'num_cols', 4) if fb else 4
+            if self.nav_index < header_count:
+                if move_x != 0:
+                    new_index = (self.nav_index + move_x) % header_count
+                elif move_y == 1:
+                    new_index = header_count
+                elif move_y == -1:
+                    new_index = self.nav_index
+                else:
+                    new_index = self.nav_index
+            else:
+                grid_idx = self.nav_index - header_count
+                if move_x != 0:
+                    new_grid_idx = (grid_idx + move_x) % (num_widgets - header_count)
+                    new_index = header_count + new_grid_idx
+                elif move_y != 0:
+                    new_grid_idx = grid_idx + (move_y * cols)
+                    if new_grid_idx < 0:
+                        new_index = 0
+                    elif new_grid_idx < (num_widgets - header_count):
+                        new_index = header_count + new_grid_idx
+                    else:
+                        new_index = self.nav_index
+                else:
+                    new_index = self.nav_index
+        elif self._nav_mode == "grid":
+            view = self.app.current_view()
+            cols = getattr(view, 'num_cols', 5)
+            step = 5 if self.fast_scroll_active else 1
+            sidebar_offset = getattr(self, '_sidebar_btn_count', 0)
+            grid_count = num_widgets - sidebar_offset
+            if self.nav_index < sidebar_offset:
+                if move_y == 1 and self.nav_index == sidebar_offset - 1:
+                    new_index = sidebar_offset
+                elif move_y != 0:
+                    new_index = (self.nav_index + move_y) % sidebar_offset
+                elif move_x == 1:
+                    new_index = sidebar_offset
+                elif move_x == -1:
+                    new_index = sidebar_offset - 1
+                else:
+                    new_index = self.nav_index
+            else:
+                rel_idx = self.nav_index - sidebar_offset
+                if move_x != 0:
+                    if self.fast_scroll_active:
+                        new_rel = (rel_idx + (move_x * step * cols)) % grid_count
+                    else:
+                        new_rel = (rel_idx + move_x) % grid_count
+                    if move_x == -1 and not self.fast_scroll_active and sidebar_offset > 0 and rel_idx % cols == 0:
+                        new_index = sidebar_offset - 1
+                    else:
+                        new_index = sidebar_offset + new_rel
+                elif move_y != 0:
+                    new_rel = rel_idx + (move_y * step * cols)
+                    if new_rel < 0:
+                        if sidebar_offset > 0:
+                            new_index = sidebar_offset - 1
+                        else:
+                            new_index = self.nav_index
+                    elif new_rel >= grid_count:
+                        new_index = self.nav_index
+                    else:
+                        new_index = sidebar_offset + new_rel
+        elif self._nav_mode == "modal":
+            if move_x != 0 or move_y != 0:
+                new_index = (self.nav_index + (move_x or move_y)) % num_widgets
+            else:
+                new_index = self.nav_index
+            if self._modal_ref and hasattr(self._modal_ref, 'scroll_to_selected'):
+                self._modal_ref.scroll_to_selected(new_index)
+        elif self._nav_mode == "keyboard":
+            new_index = self._move_selection_keyboard(move_x, move_y)
+        else:
+            if move_x != 0:
+                cur = self.nav_list[self.nav_index]
+                if self._is_valid(cur):
+                    cur_geo = cur.geometry()
+                    cur_rx = cur.mapToGlobal(cur_geo.topLeft()).x()
+                    cur_cy = cur.mapToGlobal(cur_geo.topLeft()).y() + cur_geo.height() / 2.0
+                    best_idx = None
+                    best_dist = float('inf')
+                    for i, w in enumerate(self.nav_list):
+                        if i == self.nav_index or not self._is_valid(w):
+                            continue
+                        w_geo = w.geometry()
+                        wx = w.mapToGlobal(w_geo.topLeft()).x()
+                        if (move_x > 0 and wx <= cur_rx) or (move_x < 0 and wx >= cur_rx):
+                            continue
+                        w_cy = w.mapToGlobal(w_geo.topLeft()).y() + w_geo.height() / 2.0
+                        y_dist = abs(w_cy - cur_cy)
+                        x_dist = abs(wx - cur_rx)
+                        score = y_dist * 2 + x_dist
+                        if score < best_dist:
+                            best_dist = score
+                            best_idx = i
+                    new_index = best_idx if best_idx is not None else self.nav_index
+            elif move_y != 0:
+                for step in range(1, num_widgets):
+                    idx = (self.nav_index + move_y * step) % num_widgets
+                    if self._is_valid(self.nav_list[idx]):
+                        new_index = idx
+                        break
+                else:
+                    new_index = self.nav_index
+            else:
+                new_index = self.nav_index
+
+        if 0 <= new_index < num_widgets and new_index != self.nav_index:
+            self.nav_index = new_index
+            self.sync_visuals()
+            if self._nav_mode == "file_browser" and self._modal_ref:
+                self._modal_ref.scroll_to_selected(self.nav_index)
+            if self._nav_mode == "grid":
+                self.app.scroll_to_library_item(self.nav_index)
+
     def trigger_input(self, func):
         self._last_input_button = time.time()
         func()
 
-    def trigger_virtual_keyboard(self, show=True):
+    def open_keyboard(self):
+        osk = getattr(self.app, 'on_screen_keyboard', None)
+        if osk is None:
+            return
+        self._nav_index_before_osk = self.nav_index
+        osk.open()
+        self.rescan()
+        self.nav_index = 0
+        self.sync_visuals()
+        if self.nav_list:
+            try:
+                self.nav_list[0].setFocus()
+            except RuntimeError:
+                pass
+        self.sound.play("confirm")
+
+    def close_keyboard(self):
+        osk = getattr(self.app, 'on_screen_keyboard', None)
+        if osk is None:
+            return
+        osk.close()
+        self.rescan()
+        self.nav_index = max(0, min(self._nav_index_before_osk, len(self.nav_list) - 1))
+        self.sync_visuals()
+
+    def _move_selection_keyboard(self, move_x, move_y):
+        if move_x == 0 and move_y == 0:
+            return self.nav_index
+        widgets = self.nav_list
+        if not widgets or self.nav_index >= len(widgets):
+            return self.nav_index
+        osk = getattr(self.app, 'on_screen_keyboard', None)
+        rows = getattr(osk, 'rows', None)
+        if not rows:
+            return self.nav_index
+        cur = widgets[self.nav_index]
         try:
-            if show:
-                subprocess.Popen(["steam", "steam://open/keyboard"])
-            else:
-                subprocess.Popen(["steam", "steam://close/keyboard"])
-        except: pass
+            cur_x = cur.mapTo(osk, cur.rect().center()).x()
+        except (RuntimeError, AttributeError):
+            return self.nav_index
+        rr = cc = -1
+        for r, row in enumerate(rows):
+            for c, b in enumerate(row):
+                if b is cur:
+                    rr, cc = r, c
+                    break
+            if rr >= 0:
+                break
+        if rr < 0:
+            return self.nav_index
+        if move_x != 0:
+            row = rows[rr]
+            nb = row[(cc + move_x) % len(row)]
+            try:
+                return widgets.index(nb)
+            except ValueError:
+                return self.nav_index
+        nr = rr + move_y
+        if not (0 <= nr < len(rows)):
+            return self.nav_index
+        best = None
+        best_dist = float('inf')
+        for b in rows[nr]:
+            try:
+                bx = b.mapTo(osk, b.rect().center()).x()
+            except RuntimeError:
+                continue
+            d = abs(bx - cur_x)
+            if d < best_dist:
+                best_dist = d
+                best = b
+        if best is None:
+            return self.nav_index
+        try:
+            return widgets.index(best)
+        except ValueError:
+            return self.nav_index
 
     def _toggle_sidebar(self):
         self.app._toggle_sidebar_visibility()

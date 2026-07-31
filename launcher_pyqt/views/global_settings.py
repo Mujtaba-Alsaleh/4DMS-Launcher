@@ -87,9 +87,6 @@ class GlobalSettingsView(QWidget):
         scroll.setWidget(inner)
         root.addWidget(scroll)
 
-        if self.app.engine:
-            self.app.engine.rescan(priority_widget=self.theme_menu)
-
     def _save(self):
         new_theme = self.theme_menu.currentText()
         if "settings" not in self.app.config_data:

@@ -1,10 +1,67 @@
 import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QScrollArea, QWidget, QGridLayout)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QCursor
+from PyQt6.QtCore import Qt, QTimer, QRectF, QSize
+from PyQt6.QtGui import QCursor, QColor, QPainter, QPainterPath, QPen, QImageReader, QPixmap
 from launcher_pyqt.controller_confirm_modal import ControllerConfirmModal
 import colors as c
+
+
+class ArtCell(QPushButton):
+    """Thumbnail preview cell for the artwork browser (is_art mode)."""
+
+    def __init__(self, pixmap, label, parent=None):
+        super().__init__(label, parent)
+        self._pix = pixmap
+        self._label = label
+        self._focused = False
+        self.setFixedHeight(175)
+        self.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+
+    def set_focused(self, focused):
+        self._focused = bool(focused)
+        self.update()
+
+    def set_pixmap(self, pixmap):
+        self._pix = pixmap
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect().adjusted(1, 1, -1, -1)
+        bg_path = QPainterPath()
+        bg_path.addRoundedRect(QRectF(r), 8, 8)
+        p.fillPath(bg_path, QColor(c.BG_INPUT))
+
+        if self._focused or self.underMouse():
+            pen = QPen(QColor(c.ACCENT if self._focused else c.ACCENT_HOVER), 2)
+            p.setPen(pen)
+            p.drawPath(bg_path)
+
+        if self._pix and not self._pix.isNull():
+            avail = QRectF(r.adjusted(8, 8, -8, -30))
+            scaled = self._pix.scaled(int(avail.width()), int(avail.height()),
+                                      Qt.AspectRatioMode.KeepAspectRatio,
+                                      Qt.TransformationMode.SmoothTransformation)
+            x = avail.center().x() - scaled.width() / 2.0
+            y = avail.center().y() - scaled.height() / 2.0
+            clip = QPainterPath()
+            clip.addRoundedRect(QRectF(x, y, scaled.width(), scaled.height()), 6, 6)
+            p.save()
+            p.setClipPath(clip)
+            p.drawPixmap(int(x), int(y), scaled)
+            p.restore()
+
+        p.setPen(QColor(c.TXT_MAIN))
+        f = self.font()
+        f.setPointSize(9)
+        p.setFont(f)
+        label_rect = QRectF(r.left() + 6, r.bottom() - 24, r.width() - 12, 18)
+        text = p.fontMetrics().elidedText(self._label, Qt.TextElideMode.ElideMiddle,
+                                          int(label_rect.width()))
+        p.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, text)
+        p.end()
 
 
 class ControllerFileBrowser(QDialog):
@@ -21,7 +78,6 @@ class ControllerFileBrowser(QDialog):
 
         self.setWindowTitle("Select Path")
         self.resize(1000, 700)
-
         if self.engine:
             self.finished.connect(lambda: QTimer.singleShot(0, self.engine.rescan))
 
@@ -114,6 +170,24 @@ class ControllerFileBrowser(QDialog):
 
         self._populate()
 
+    def _compute_cols(self):
+        w = self.width()
+        if w <= 0:
+            return self.num_cols
+        return max(2, min(6, (w - 32) // 200))
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not hasattr(self, '_grid_layout') or not hasattr(self, 'current_path'):
+            return
+        w = event.size().width()
+        if w <= 0:
+            return
+        new_cols = max(2, min(6, (w - 32) // 200))
+        if new_cols != self.num_cols:
+            self.num_cols = new_cols
+            self._populate()
+
     def showEvent(self, event):
         super().showEvent(event)
         if self.engine:
@@ -121,6 +195,7 @@ class ControllerFileBrowser(QDialog):
 
     def _populate(self):
         self._clear_grid()
+        self.num_cols = self._compute_cols()
         self._path_label.setText(self.current_path)
         self.setWindowTitle(f"Select Path \u2014 {os.path.basename(self.current_path) or self.current_path}")
 
@@ -148,22 +223,38 @@ class ControllerFileBrowser(QDialog):
             return
 
         num_cols = self.num_cols
+        self._cell_h = 90
         for idx, (item, full_path, is_dir) in enumerate(entries):
-            icon = "\U0001f4c1" if is_dir else "\U0001f4c4"
-            display = f"{icon}  {item}"
-
-            btn = QPushButton(display)
-            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-            btn.setStyleSheet(f"""
-                QPushButton {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 12px;
-                               border-radius: 6px; padding: 12px 10px; text-align: left; }}
-                QPushButton:hover {{ background: {c.ACCENT_HOVER}; border: 1px solid {c.ACCENT}; }}
-            """)
+            if self.is_art and not is_dir:
+                pix = self._load_thumb(full_path)
+                btn = ArtCell(pix, item)
+                self._cell_h = 175
+            else:
+                icon = "\U0001f4c1" if is_dir else "\U0001f4c4"
+                btn = QPushButton(f"{icon}  {item}")
+                btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+                btn.setStyleSheet(f"""
+                    QPushButton {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 12px;
+                                   border-radius: 6px; padding: 12px 10px; text-align: left; }}
+                    QPushButton:hover {{ background: {c.ACCENT_HOVER}; border: 1px solid {c.ACCENT}; }}
+                """)
             btn.clicked.connect(lambda checked=False, p=full_path: self._handle_select(p))
             self._grid_layout.addWidget(btn, idx // num_cols, idx % num_cols)
 
         if self.engine:
             QTimer.singleShot(0, self.engine.rescan)
+
+    def _load_thumb(self, full_path):
+        try:
+            reader = QImageReader(full_path)
+            reader.setAutoTransform(True)
+            reader.setScaledSize(QSize(400, 400))
+            img = reader.read()
+            if img.isNull():
+                return None
+            return QPixmap.fromImage(img)
+        except Exception:
+            return None
 
     def _clear_grid(self):
         while self._grid_layout.count():
@@ -210,7 +301,7 @@ class ControllerFileBrowser(QDialog):
         if self._grid_layout.count() == 0:
             return
         row = selected_index // self.num_cols
-        sb.setValue(row * 90)
+        sb.setValue(row * getattr(self, '_cell_h', 90))
 
     def _create_directory(self):
         path = os.path.join(self.current_path, "pfx")

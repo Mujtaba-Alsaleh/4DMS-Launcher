@@ -107,9 +107,6 @@ class LiveSplitView(QWidget):
 
         self._update_status()
 
-        if self.app.engine:
-            self.app.engine.rescan(priority_widget=self._launch_btn)
-
     def _update_status(self):
         mgr = self.app.livesplit
         ls_status = "Running" if mgr.process and mgr.process.poll() is None else "Stopped"

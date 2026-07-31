@@ -1,5 +1,5 @@
-from PyQt6.QtWidgets import QLabel
-from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QLabel, QGraphicsOpacityEffect
+from PyQt6.QtCore import QTimer, QPropertyAnimation, QEasingCurve
 import colors as c
 
 
@@ -18,6 +18,15 @@ class ToastManager:
         """)
         toast.adjustSize()
         toast.raise_()
+        effect = QGraphicsOpacityEffect(toast)
+        effect.setOpacity(0.0)
+        toast.setGraphicsEffect(effect)
+        fade_in = QPropertyAnimation(effect, b"opacity")
+        fade_in.setDuration(150)
+        fade_in.setEndValue(1.0)
+        fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
+        toast._toast_fade_in = fade_in
+        fade_in.start()
         self.toasts.append(toast)
         self._reposition()
         QTimer.singleShot(duration_ms, lambda: self._dismiss(toast))
@@ -31,6 +40,22 @@ class ToastManager:
             y_offset -= 40
 
     def _dismiss(self, toast):
+        try:
+            effect = toast.graphicsEffect()
+            if isinstance(effect, QGraphicsOpacityEffect):
+                fade_out = QPropertyAnimation(effect, b"opacity")
+                fade_out.setDuration(200)
+                fade_out.setEndValue(0.0)
+                fade_out.setEasingCurve(QEasingCurve.Type.InQuad)
+                fade_out.finished.connect(lambda: self._finalize(toast))
+                toast._toast_fade_out = fade_out
+                fade_out.start()
+                return
+        except RuntimeError:
+            pass
+        self._finalize(toast)
+
+    def _finalize(self, toast):
         try:
             toast.hide()
             toast.deleteLater()

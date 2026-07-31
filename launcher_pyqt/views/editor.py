@@ -236,9 +236,6 @@ class EditorView(QWidget):
         scroll.setWidget(inner)
         root.addWidget(scroll)
 
-        if self.app.engine:
-            self.app.engine.rescan(priority_widget=self.e_name)
-
     def _create_row(self, parent, label_text, value, is_file=True, extra_btn=None):
         row = QHBoxLayout()
         lbl = QLabel(label_text.upper())
@@ -351,4 +348,5 @@ class EditorView(QWidget):
     def _confirm_delete(self):
         del self.app.config_data[self.game_id]
         self.app.config_manager.save_data(self.app.config_data)
+        self.app._purge_game_views(self.game_id)
         self.app.show_library()

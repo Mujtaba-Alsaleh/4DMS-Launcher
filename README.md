@@ -4,15 +4,16 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 
 ## Features
 
-- Launch Windows games through Proton/Wine on Linux
-- Built-in controller support (gamepad navigation via legacy joystick API, button prompts, volume overlay)
+- Launch Windows games through Proton/Wine on Linux via [umu-run](https://github.com/Open-Wine-Components/umu-launcher)
+- Controller-native navigation (gamepad via the legacy Linux joystick API, no SDL) with full keyboard-layer and mouse parity
+- In-app on-screen keyboard for text entry (no external Steam/Plasma keyboard needed)
+- Game library with artwork, search, sort/filter, playtime tracking, and favorites
 - Per-game configuration: Proton version, Gamescope, MangoHUD, Wineprefix, launch scripts
-- LiveSplit integration for speedrunning (auto-launch, TCP server, global hotkeys via evdev)
-- Steam on-screen keyboard integration
-- Game library with artwork, playtime tracking, and favorites
+- LiveSplit integration for speedrunning (auto-launch via system Wine, TCP server, global hotkeys via evdev)
 - UMU ID database for automatic Proton compatibility matching
 - Prefix creator for setting up Wineprefixes
-- File browser for navigating paths with controller
+- Controller file browser for navigating paths with a gamepad
+- Placeholder artwork generation for games without covers
 - Themes: Deep Blue, Amber Glow, Synthwave
 
 ## Requirements
@@ -20,10 +21,8 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 - Python 3.10+
 - [umu-run](https://github.com/Open-Wine-Components/umu-launcher) installed and in PATH
 - Wine (for LiveSplit, optional)
-- PyQt6 (`pip install PyQt6`)
-- psutil (`pip install psutil`)
-- Pillow (`pip install Pillow`)
-- Steam (optional, for on-screen keyboard)
+- PyQt6, psutil, Pillow (installed via `requirements.txt`)
+- pw-play/paplay/aplay for sound effects (PipeWire/ALSA)
 
 ## Installation
 
@@ -42,27 +41,27 @@ python launcher_pyqt/main.py
 4DMS-Launcher/
 ├── launcher_pyqt/            # Active PyQt6 codebase
 │   ├── main.py               # Entry point
-│   ├── app.py                # Main application window
+│   ├── app.py                # Main window, view switching, keyboard layer
 │   ├── config.py             # Configuration manager
-│   ├── game_process.py       # Game launch/process management
+│   ├── game_process.py       # Game launch/process management (umu-run)
 │   ├── artwork.py            # Artwork management
 │   ├── umu_database.py       # UMU ID lookup
 │   ├── toast.py              # Toast notifications
-│   ├── utils.py              # Shared utilities
-│   ├── input_engine.py       # Controller input (joystick API, no SDL/pygame)
+│   ├── utils.py              # Shared utilities (placeholder art generator)
+│   ├── input_engine.py       # Controller input + navigation (joystick API, no SDL)
+│   ├── on_screen_keyboard.py # In-app controller keyboard
 │   ├── controller_confirm_modal.py
 │   ├── controller_file_browser.py
 │   ├── pfx_creator.py        # Wineprefix creator
 │   └── views/
-│       ├── library.py        # Game library grid
+│       ├── library.py        # Game library grid + search/sort/filter
 │       ├── dashboard.py      # Game detail view
 │       ├── editor.py         # Game settings editor
 │       ├── global_settings.py
-│       └── volume_overlay.py
+│       └── livesplit_view.py
 ├── colors.py                 # Theme constants (shared)
 ├── livesplit.py              # LiveSplit integration (shared)
 ├── resources/                # Icons, sounds, UMU database
-└── launcher/                 # Legacy CustomTkinter codebase (inactive)
 ```
 
 ## License
