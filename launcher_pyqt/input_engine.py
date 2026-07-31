@@ -221,6 +221,7 @@ class UmuInputEngineQt:
 
         self._nav_mode = "none"
         self._modal_ref = None
+        self._btn_prev = {}
 
         self.sound = SoundManager()
 
@@ -494,11 +495,18 @@ class UmuInputEngineQt:
                     return
 
                 if not button_cooldown_active:
-                    if joy.get_button(0):
+                    # rising-edge: only trigger on press, not hold
+                    def rising(b):
+                        cur = joy.get_button(b)
+                        prev = self._btn_prev.get(b, False)
+                        self._btn_prev[b] = cur
+                        return cur and not prev
+
+                    if rising(0):
                         self.trigger_input(self.press_current)
                         self.sound.play("confirm")
                         return
-                    elif joy.get_button(1):
+                    elif rising(1):
                         if self._nav_mode in ("file_browser", "modal") and self._modal_ref:
                             self.trigger_input(self._modal_ref._cancel)
                         else:
@@ -508,17 +516,17 @@ class UmuInputEngineQt:
 
                     if self._nav_mode in ("file_browser", "modal"):
                         pass
-                    elif joy.get_button(4):
+                    elif rising(4):
                         if self._nav_mode == "grid":
                             self.trigger_input(self.app.current_view().cycle_sort)
                             self.sound.play("confirm")
                         return
-                    elif joy.get_button(5):
+                    elif rising(5):
                         if self._nav_mode == "grid":
                             self.trigger_input(self.app.current_view().cycle_filter)
                             self.sound.play("confirm")
                         return
-                    elif joy.get_button(2):
+                    elif rising(2):
                         if self._nav_mode == "grid" and getattr(self.app, 'current_game_id', None):
                             gid = self.app.current_game_id
                             self.trigger_input(lambda gid=gid: self.app.show_dashboard(gid))
@@ -526,26 +534,26 @@ class UmuInputEngineQt:
                             self.trigger_input(lambda: self.app.show_editor() if getattr(self.app, 'current_game_id', None) else None)
                         self.sound.play("confirm")
                         return
-                    elif joy.get_button(3):
+                    elif rising(3):
                         vs = self.app.view_state
                         if vs == "settings":
                             self.trigger_input(self.app.save_game)
                         elif vs == "dashboard":
-                            self.trigger_input(self.app.browse_artwork)
+                            QTimer.singleShot(0, lambda: self.trigger_input(self.app.browse_artwork))
                         elif vs == "library":
                             self.trigger_input(self.app.current_view().toggle_favorite)
                         self.sound.play("confirm")
                         return
-                    elif joy.get_button(7):
+                    elif rising(7):
                         self.trigger_input(lambda: self.app.try_launch_game() if getattr(self.app, 'current_game_id', None) else None)
                         if getattr(self.app, 'current_game_id', None):
                             self.sound.play("launch")
                         return
-                    elif joy.get_button(8):
+                    elif rising(8):
                         self.trigger_input(self._toggle_sidebar)
                         self.sound.play("confirm")
                         return
-                    elif joy.get_button(9):
+                    elif rising(9):
                         self.trigger_input(lambda: setattr(self, 'fast_scroll_active', not self.fast_scroll_active))
                         return
 
@@ -575,6 +583,7 @@ class UmuInputEngineQt:
                 if (move_x != 0 or move_y != 0) and not cooldown_active:
                     self.last_input = now
                     num_widgets = len(self.nav_list)
+                    new_index = self.nav_index
                     self.sound.play("move")
                     if num_widgets == 0:
                         return
@@ -590,6 +599,8 @@ class UmuInputEngineQt:
                                 new_index = header_count
                             elif move_y == -1:
                                 new_index = self.nav_index
+                            else:
+                                new_index = self.nav_index
                         else:
                             grid_idx = self.nav_index - header_count
                             if move_x != 0:
@@ -603,6 +614,8 @@ class UmuInputEngineQt:
                                     new_index = header_count + new_grid_idx
                                 else:
                                     new_index = self.nav_index
+                            else:
+                                new_index = self.nav_index
                     elif self._nav_mode == "grid":
                         view = self.app.current_view()
                         cols = getattr(view, 'num_cols', 5)
@@ -659,6 +672,8 @@ class UmuInputEngineQt:
                     elif self._nav_mode == "modal":
                         if move_x != 0 or move_y != 0:
                             new_index = (self.nav_index + (move_x or move_y)) % num_widgets
+                        else:
+                            new_index = self.nav_index
                         if self._modal_ref and hasattr(self._modal_ref, 'scroll_to_selected'):
                             self._modal_ref.scroll_to_selected(new_index)
                     else:

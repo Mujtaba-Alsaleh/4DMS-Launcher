@@ -1,4 +1,5 @@
 __pycache__/*
+launcher_pyqt/__pycache__/*
 .venv/*
 backup/*
 build/*

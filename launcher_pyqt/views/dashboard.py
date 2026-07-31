@@ -190,6 +190,8 @@ class DashboardView(QWidget):
         browser = ControllerFileBrowser(self, is_file=True, is_art=True, callback=on_selected, engine=self.app.engine)
         browser.exec()
         self.app.view_state = prev_state
+        if self.app.engine:
+            self.app.engine.rescan()
 
     def _remove_artwork(self):
         data = self.app.config_data[self.game_id]
