@@ -48,14 +48,18 @@ python launcher_pyqt/main.py
 │   ├── umu_database.py       # UMU ID lookup
 │   ├── toast.py              # Toast notifications
 │   ├── utils.py              # Shared utilities (placeholder art generator)
+│   ├── ui.py                 # Design system (fonts, QSS, tab/button styles)
 │   ├── input_engine.py       # Controller input + navigation (joystick API, no SDL)
 │   ├── on_screen_keyboard.py # In-app controller keyboard
+│   ├── quick_settings.py     # Quick-settings overlay (X button)
+│   ├── add_game_modal.py     # Non-blocking add-game dialog
 │   ├── controller_confirm_modal.py
 │   ├── controller_file_browser.py
 │   ├── pfx_creator.py        # Wineprefix creator
 │   └── views/
-│       ├── library.py        # Game library grid + search/sort/filter
-│       ├── dashboard.py      # Game detail view
+│       ├── home.py           # Home view (featured + recently played carousel)
+│       ├── library.py        # Game library grid + search
+│       ├── dashboard.py      # Game detail view (hero art, floating card)
 │       ├── editor.py         # Game settings editor
 │       ├── global_settings.py
 │       └── livesplit_view.py

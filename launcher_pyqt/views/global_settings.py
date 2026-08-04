@@ -59,6 +59,51 @@ class GlobalSettingsView(QWidget):
         theme_inner.addWidget(apply_btn)
         layout.addWidget(theme_card)
 
+        # Default Proton
+        proton_card = QFrame()
+        proton_card.setStyleSheet(f"""
+            QFrame {{ background: {c.BG_PANEL}; border: 1px solid {c.BG_FOCUS};
+                      border-radius: 12px; }}
+        """)
+        proton_inner = QVBoxLayout(proton_card)
+        proton_inner.setContentsMargins(20, 16, 20, 16)
+        proton_inner.setSpacing(8)
+
+        proton_title = QLabel("DEFAULT PROTON")
+        proton_title.setStyleSheet(f"color: {c.ACCENT}; font: bold 14px;")
+        proton_inner.addWidget(proton_title)
+
+        proton_sub = QLabel("Used by any game set to \"Use Default\"")
+        proton_sub.setStyleSheet(f"color: {c.TXT_DIM}; font: 10px;")
+        proton_inner.addWidget(proton_sub)
+
+        self.proton_menu = QComboBox()
+        self.proton_menu.addItem("Default (UMU Internal)")
+        for p in sorted(self.app.proton_paths.keys(), key=str.lower):
+            if p != "Default (UMU Internal)":
+                self.proton_menu.addItem(p)
+        current = self.app.config_data.get("settings", {}).get("default_proton", "")
+        if current:
+            idx = self.proton_menu.findText(current)
+            if idx >= 0:
+                self.proton_menu.setCurrentIndex(idx)
+        self.proton_menu.setStyleSheet(f"""
+            QComboBox {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 12px;
+                         border-radius: 6px; padding: 8px; }}
+            QComboBox::drop-down {{ border: none; }}
+        """)
+        proton_inner.addWidget(self.proton_menu)
+
+        proton_apply = QPushButton("SAVE DEFAULT PROTON")
+        proton_apply.setStyleSheet(f"""
+            QPushButton {{ background: transparent; color: {c.ACCENT}; font: bold 12px;
+                           border: 1px solid {c.ACCENT}; border-radius: 6px; padding: 10px; }}
+            QPushButton:hover {{ background: {c.ACCENT_HOVER}; color: {c.TXT_MAIN}; }}
+        """)
+        proton_apply.clicked.connect(self._save_proton)
+        proton_inner.addWidget(proton_apply)
+        layout.addWidget(proton_card)
+
         # Storage
         storage_card = QFrame()
         storage_card.setStyleSheet(f"""
@@ -97,6 +142,16 @@ class GlobalSettingsView(QWidget):
         c.apply_theme(new_theme)
         self.app.apply_theme_visuals()
         self.app.show_library()
+
+    def _save_proton(self):
+        proto_text = self.proton_menu.currentText()
+        if proto_text == "Default (UMU Internal)":
+            proto_text = ""
+        if "settings" not in self.app.config_data:
+            self.app.config_data["settings"] = {}
+        self.app.config_data["settings"]["default_proton"] = proto_text
+        self.app.config_manager.save_data(self.app.config_data)
+        self.app.toast.show(f"Default Proton: {proto_text or 'UMU Internal'}")
 
     def _clear_artwork(self):
         self.app.artwork_manager.clear_all(self.app.config_data, self.app.config_manager.save_data)

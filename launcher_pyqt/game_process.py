@@ -14,6 +14,12 @@ class GameProcessManager:
         self.launch_lock = False
         self.launch_lock_cooldown = 2000
 
+    def _resolve_proton(self, data):
+        proton = data.get('proton', "") or ""
+        if proton:
+            return proton
+        return self.app.config_data.get("settings", {}).get("default_proton", "") or ""
+
     def try_launch(self):
         if self.is_playing:
             self.stop()
@@ -28,7 +34,7 @@ class GameProcessManager:
         if not exe:
             return
 
-        proton = data.get('proton', "")
+        proton = self._resolve_proton(data)
         p_path = self.app.proton_paths.get(proton, "")
         if not p_path and proton and proton != "Default (UMU Internal)":
             return
@@ -56,12 +62,14 @@ class GameProcessManager:
         QTimer.singleShot(self.launch_lock_cooldown, self._release_lock)
 
     def _refresh_library_badges(self):
-        view = self.app._views.get('library') if hasattr(self.app, '_views') else None
-        if view and hasattr(view, '_update_running_badges'):
-            try:
-                view._update_running_badges()
-            except RuntimeError:
-                pass
+        views = self.app._views if hasattr(self.app, '_views') else {}
+        for key in ("library", "home"):
+            view = views.get(key)
+            if view and hasattr(view, '_update_running_badges'):
+                try:
+                    view._update_running_badges()
+                except RuntimeError:
+                    pass
 
     def _release_lock(self):
         self.launch_lock = False
@@ -125,7 +133,7 @@ class GameProcessManager:
         start_time = time.time()
         g_id = self.app.current_game_id
         data = self.app.config_data[g_id]
-        proton = data.get('proton', "")
+        proton = self._resolve_proton(data)
         p_path = self.app.proton_paths.get(proton, "")
         gameid = data.get('GAMEID', "0")
         exe_path = os.path.abspath(data['exe'])

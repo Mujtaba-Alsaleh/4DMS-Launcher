@@ -19,19 +19,20 @@ class LiveSplitView(QWidget):
         mgr.app = self.app
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(30, 20, 30, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(30, 12, 30, 12)
+        root.setSpacing(10)
 
-        title = QLabel("LIVESPLIT MANAGEMENT")
-        title.setStyleSheet(f"color: {c.ACCENT}; font: bold 22px;")
+        title = QLabel("LIVESPLIT")
+        title.setStyleSheet(f"color: {c.ACCENT}; font: bold 18px;")
         root.addWidget(title)
 
         status_card = QFrame()
         status_card.setStyleSheet(f"""
             QFrame {{ background: {c.BG_PANEL}; border: 1px solid {c.BG_FOCUS};
-                       border-radius: 10px; padding: 16px; }}
+                       border-radius: 8px; padding: 10px; }}
         """)
         status_layout = QVBoxLayout(status_card)
+        status_layout.setSpacing(4)
 
         ls_status = "Running" if mgr.process and mgr.process.poll() is None else "Stopped"
         connected = hasattr(mgr, 'client') and mgr.client is not None
@@ -39,60 +40,68 @@ class LiveSplitView(QWidget):
         ls_color = c.SUCCESS if ls_status == "Running" else c.TXT_DIM
         conn_color = c.SUCCESS if conn_status == "Connected" else c.TXT_DIM
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(12)
         self._status_lbl = QLabel(f"Status: {ls_status}")
-        self._status_lbl.setStyleSheet(f"color: {ls_color}; font: bold 14px;")
-        status_layout.addWidget(self._status_lbl)
-
+        self._status_lbl.setStyleSheet(f"color: {ls_color}; font: bold 13px;")
+        status_row.addWidget(self._status_lbl)
         self._conn_lbl = QLabel(f"TCP: {conn_status}")
         self._conn_lbl.setStyleSheet(f"color: {conn_color}; font: 12px;")
-        status_layout.addWidget(self._conn_lbl)
+        status_row.addWidget(self._conn_lbl)
+        status_row.addStretch(1)
+        status_layout.addLayout(status_row)
 
         root.addWidget(status_card)
 
-        # Launch / Stop
         btn_row = QHBoxLayout()
-        self._launch_btn = QPushButton("Launch LiveSplit")
+        btn_row.setSpacing(8)
+        self._launch_btn = QPushButton("Launch")
+        self._launch_btn.setFixedHeight(34)
         self._launch_btn.setStyleSheet(f"""
-            QPushButton {{ background: {c.ACCENT}; color: white; font: bold 13px;
-                           border-radius: 6px; padding: 10px 20px; }}
+            QPushButton {{ background: {c.ACCENT}; color: white; font: bold 12px;
+                           border-radius: 6px; padding: 6px 16px; }}
             QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
         """)
         self._launch_btn.clicked.connect(self._launch_livesplit)
         btn_row.addWidget(self._launch_btn)
 
         stop_btn = QPushButton("STOP")
+        stop_btn.setFixedHeight(34)
         stop_btn.setStyleSheet(f"""
-            QPushButton {{ background: #e74c3c; color: white; font: bold 13px;
-                           border-radius: 6px; padding: 10px 20px; }}
-            QPushButton:hover {{ background: #c0392b; }}
+            QPushButton {{ background: transparent; color: {c.DANGER}; font: bold 12px;
+                           border: 1px solid {c.DANGER}; border-radius: 6px;
+                           padding: 6px 16px; }}
+            QPushButton:hover {{ background: {c.DANGER}; color: white; }}
         """)
         stop_btn.clicked.connect(self._stop_livesplit)
         btn_row.addWidget(stop_btn)
-        btn_row.addStretch()
         root.addLayout(btn_row)
 
         hk_card = QFrame()
         hk_card.setStyleSheet(f"""
             QFrame {{ background: {c.BG_PANEL}; border: 1px solid {c.BG_FOCUS};
-                       border-radius: 10px; padding: 16px; }}
+                       border-radius: 8px; padding: 10px; }}
         """)
         hk_layout = QVBoxLayout(hk_card)
+        hk_layout.setSpacing(4)
 
-        hk_title = QLabel("HOTKEYS (click to rebind)")
-        hk_title.setStyleSheet(f"color: {c.ACCENT}; font: bold 12px;")
+        hk_title = QLabel("HOTKEYS")
+        hk_title.setStyleSheet(f"color: {c.ACCENT}; font: bold 11px;")
         hk_layout.addWidget(hk_title)
 
         mgr.load_hotkeys()
         for action, (key_name, _mods) in (mgr._hotkeys or {}).items():
             row = QHBoxLayout()
+            row.setSpacing(6)
             act_lbl = QLabel(action)
-            act_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: 12px;")
+            act_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: 11px;")
+            act_lbl.setFixedWidth(90)
             row.addWidget(act_lbl)
             row.addStretch()
             key_btn = QPushButton(key_name)
             key_btn.setStyleSheet(f"""
-                QPushButton {{ background: {c.BG_INPUT}; color: {c.ACCENT}; font: bold 12px;
-                               border-radius: 4px; padding: 4px 12px; min-width: 80px; }}
+                QPushButton {{ background: {c.BG_INPUT}; color: {c.ACCENT}; font: bold 11px;
+                               border-radius: 4px; padding: 3px 10px; min-width: 70px; }}
                 QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
             """)
             key_btn.clicked.connect(lambda checked=False, a=action: self._begin_rebind(a))

@@ -4,7 +4,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from PyQt6.QtCore import QTimer, Qt, QObject, QEvent
 from PyQt6.QtWidgets import (QWidget, QPushButton, QLineEdit, QTextEdit,
-                             QPlainTextEdit, QCheckBox, QComboBox, QApplication)
+                             QPlainTextEdit, QCheckBox, QComboBox, QApplication,
+                             QScrollArea)
 
 import colors as c
 
@@ -345,10 +346,23 @@ class UmuInputEngineQt:
             elif isinstance(modal, ControllerConfirmModal):
                 return "modal", modal
             return "modal", modal
+        agm = getattr(self.app, '_add_game_modal', None)
+        if agm is not None:
+            try:
+                if agm.isVisible():
+                    return "modal", agm
+            except RuntimeError:
+                pass
+        qs = getattr(self.app, 'quick_settings', None)
+        try:
+            if qs is not None and qs.isVisible():
+                return "quick_settings", qs
+        except RuntimeError:
+            pass
         vs = self.app.view_state
         if vs == "library":
             return "grid", None
-        elif vs in ("dashboard", "settings", "global_settings", "prefix_creator", "livesplit"):
+        elif vs in ("home", "dashboard", "settings", "global_settings", "prefix_creator", "livesplit"):
             return "list", None
         return "none", None
 
@@ -365,10 +379,16 @@ class UmuInputEngineQt:
 
         if mode == "grid":
             view = self.app.current_view()
-            if view and hasattr(view, 'grid') and view.grid:
-                for child in view.grid.findChildren(QWidget):
-                    if hasattr(child, 'game_id') and child.isVisible():
-                        self.nav_list.append(child)
+            if view:
+                header = getattr(view, '_header_nav', None) or []
+                for w in header:
+                    if self._is_valid(w) and w not in self.nav_list:
+                        self.nav_list.append(w)
+                grid = getattr(view, 'grid', None)
+                if grid:
+                    for child in grid.findChildren(QWidget):
+                        if hasattr(child, 'game_id') and child.isVisible() and child not in self.nav_list:
+                            self.nav_list.append(child)
 
         elif mode == "list":
             view = self.app.current_view()
@@ -378,34 +398,66 @@ class UmuInputEngineQt:
         elif mode == "keyboard":
             self._scan_widget_tree(modal)
 
+        elif mode == "quick_settings":
+            self._scan_widget_tree(modal)
+
         elif mode == "file_browser":
             self._scan_widget_tree(modal)
 
         elif mode == "modal":
             self._scan_widget_tree(modal)
 
-        sidebar_btn_count = 0
-        if mode in ("grid", "list") and self.app._sidebar.isVisible():
-            sidebar_nav = [btn for btn in self.app.nav_widgets
-                           if btn.isVisible() and btn.isEnabled()]
-            sidebar_btn_count = len(sidebar_nav)
-            self.nav_list = sidebar_nav + self.nav_list
-        self._sidebar_btn_count = sidebar_btn_count
+        tabs = []
+        if mode in ("grid", "list"):
+            tab_btns = getattr(self.app, 'tab_buttons', [])
+            tabs = [b for b in tab_btns if self._is_valid(b)]
+        self._tabs_btn_count = len(tabs)
+        self._tab_keys = [b._tab_key for b in tabs]
+        self._tabs_active_idx = self._tab_active_index()
+        self.nav_list = tabs + self.nav_list
 
+        view_changed = self.app.view_state != getattr(self, '_prev_view_state', None)
         if priority_widget and priority_widget in self.nav_list:
             self.nav_index = self.nav_list.index(priority_widget)
+        elif view_changed and tabs and len(self.nav_list) > len(tabs):
+            header = getattr(view, '_header_nav', None) if mode == "grid" else None
+            skip = len(header) if header else 0
+            if len(self.nav_list) > len(tabs) + skip:
+                self.nav_index = len(tabs) + skip
+            else:
+                self.nav_index = len(tabs)
         elif self.nav_index >= len(self.nav_list):
             self.nav_index = 0
         self.sync_visuals()
 
+    def _tab_active_index(self):
+        keys = getattr(self, '_tab_keys', [])
+        if not keys:
+            return 0
+        idx_map = {"home": 0, "library": 1, "dashboard": 1, "settings": 1,
+                   "prefix_creator": 1, "livesplit": 2, "tools": 2,
+                   "global_settings": 3}
+        idx = idx_map.get(self.app.view_state, 1)
+        return idx if idx < len(keys) else 0
+
     def _scan_widget_tree(self, parent):
         for child in parent.findChildren(QWidget):
             try:
+                if getattr(child, '_mouse_only', False):
+                    continue
                 if isinstance(child, NAV_TYPES) and child.isEnabled() and child.isVisible():
                     if child not in self.nav_list:
                         self.nav_list.append(child)
             except RuntimeError:
                 pass
+
+    def _details_open(self):
+        view = self.app.current_view()
+        if view is None:
+            return False
+        return bool(getattr(view, 'details_overlay_open', False)
+                    or getattr(view, 'art_overlay_open', False)
+                    or getattr(view, 'settings_overlay_open', False))
 
     # ---- Actions -----------------------------------------------------------
 
@@ -428,7 +480,9 @@ class UmuInputEngineQt:
             target.animateClick()
             return
         elif hasattr(target, 'game_id'):
-            self.app.try_launch_game()
+            gid = getattr(target, 'game_id', None)
+            if gid:
+                self.app.show_dashboard(gid)
             return
         elif isinstance(target, (QLineEdit, QTextEdit, QPlainTextEdit)):
             target.setFocus()
@@ -472,7 +526,7 @@ class UmuInputEngineQt:
         self._prev_focus_target = target
         view_state = getattr(self.app, 'view_state', '')
 
-        if view_state == "library":
+        if view_state in ("library", "home"):
             prev = getattr(self, '_lib_prev_btn', None)
             if prev and prev != target and self._is_valid(prev):
                 try:
@@ -490,7 +544,7 @@ class UmuInputEngineQt:
                     f"border: 3px solid {c.ACCENT}; border-radius: 8px; padding: 3px;"
                 )
             self._lib_prev_btn = target
-        elif self._prev_view_state == "library":
+        elif self._prev_view_state in ("library", "home"):
             prev = getattr(self, '_lib_prev_btn', None)
             if prev and self._is_valid(prev):
                 try:
@@ -513,7 +567,13 @@ class UmuInputEngineQt:
 
         if self._is_valid(target):
             try:
-                if self._nav_mode == "keyboard":
+                if self._nav_mode not in ("grid", "file_browser"):
+                    self._ensure_scrolled(target)
+                if isinstance(target, (QLineEdit, QTextEdit, QPlainTextEdit)):
+                    pass
+                elif isinstance(target, QComboBox) and self._nav_mode == "quick_settings":
+                    pass
+                elif self._nav_mode == "keyboard":
                     fw = QApplication.focusWidget()
                     if not isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit)):
                         target.setFocus()
@@ -522,9 +582,23 @@ class UmuInputEngineQt:
             except Exception:
                 pass
 
+    def _ensure_scrolled(self, widget):
+        """Scroll any QScrollArea ancestor so the focused widget is visible.
+        Programmatic setFocus() does NOT auto-scroll scroll areas, so nav
+        could land on (and click) buttons that are off-screen."""
+        p = widget.parentWidget()
+        while p is not None:
+            try:
+                if isinstance(p, QScrollArea):
+                    p.ensureWidgetVisible(widget, 8, 8)
+                    return
+            except (RuntimeError, AttributeError):
+                return
+            p = p.parentWidget()
+
     def _apply_focus_style(self, widget, focused):
         try:
-            if hasattr(widget, 'game_image') and widget.game_image is not None:
+            if hasattr(widget, 'game_image'):
                 return
             base = getattr(widget, '_nav_base_style', None)
             current = widget.styleSheet()
@@ -535,7 +609,7 @@ class UmuInputEngineQt:
                 focus_extra = ""
                 if isinstance(widget, QPushButton):
                     focus_extra = f"""
-                        QPushButton {{ border: 3px solid {c.TXT_MAIN} !important;
+                        QPushButton {{ border: 3px solid {c.FOCUS_RING} !important;
                                        border-radius: 6px !important; }}
                     """
                 elif isinstance(widget, QLineEdit):
@@ -610,6 +684,8 @@ class UmuInputEngineQt:
                     elif rising(1):
                         if self._nav_mode == "keyboard":
                             self.trigger_input(self.close_keyboard)
+                        elif self._nav_mode == "quick_settings":
+                            self.trigger_input(self.app.close_quick_settings)
                         elif self._nav_mode in ("file_browser", "modal") and self._modal_ref:
                             self.trigger_input(self._modal_ref._cancel)
                         else:
@@ -620,41 +696,49 @@ class UmuInputEngineQt:
                     if self._nav_mode in ("file_browser", "modal", "keyboard"):
                         pass
                     elif rising(4):
-                        if self._nav_mode == "grid":
-                            self.trigger_input(self.app.current_view().cycle_sort)
+                        if self._nav_mode in ("grid", "list"):
+                            self.trigger_input(lambda: self.app._kb_tab(-1))
                             self.sound.play("confirm")
                         return
                     elif rising(5):
-                        if self._nav_mode == "grid":
-                            self.trigger_input(self.app.current_view().cycle_filter)
+                        if self._nav_mode in ("grid", "list"):
+                            self.trigger_input(lambda: self.app._kb_tab(1))
                             self.sound.play("confirm")
                         return
                     elif rising(2):
-                        if self._nav_mode == "grid" and getattr(self.app, 'current_game_id', None):
-                            gid = self.app.current_game_id
-                            self.trigger_input(lambda gid=gid: self.app.show_dashboard(gid))
-                        elif self._nav_mode == "list":
-                            self.trigger_input(lambda: self.app.show_editor() if getattr(self.app, 'current_game_id', None) else None)
+                        if self._nav_mode != "quick_settings":
+                            vs = self.app.view_state
+                            if vs in ("home", "library", "dashboard") and not self._details_open():
+                                gid = self.app._focused_game_id() or getattr(self.app, 'current_game_id', None)
+                                if gid:
+                                    self.trigger_input(lambda gid=gid: self.app.open_quick_settings(gid))
                         self.sound.play("confirm")
                         return
                     elif rising(3):
+                        if self._nav_mode == "quick_settings":
+                            self.sound.play("confirm")
+                            return
                         vs = self.app.view_state
                         if vs == "settings":
                             self.trigger_input(self.app.save_game)
-                        elif vs == "dashboard":
-                            QTimer.singleShot(0, lambda: self.trigger_input(self.app.browse_artwork))
-                        elif vs == "library":
-                            self.trigger_input(self.app.current_view().toggle_favorite)
+                        elif vs == "dashboard" and not self._details_open():
+                            view = self.app.current_view()
+                            if view is not None and not getattr(view, 'art_overlay_open', False):
+                                QTimer.singleShot(0, lambda: self.trigger_input(view._open_art))
+                        elif vs in ("library", "home"):
+                            gid = self.app._focused_game_id()
+                            if gid:
+                                self.trigger_input(lambda gid=gid: self.app.toggle_favorite_for(gid))
                         self.sound.play("confirm")
                         return
                     elif rising(7):
-                        self.trigger_input(lambda: self.app.try_launch_game() if getattr(self.app, 'current_game_id', None) else None)
-                        if getattr(self.app, 'current_game_id', None):
+                        if self._nav_mode == "quick_settings":
+                            return
+                        gid = self.app._focused_game_id() or getattr(self.app, 'current_game_id', None)
+                        if gid:
+                            self.app.current_game_id = gid
+                            self.trigger_input(self.app.try_launch_game)
                             self.sound.play("launch")
-                        return
-                    elif rising(8):
-                        self.trigger_input(self._toggle_sidebar)
-                        self.sound.play("confirm")
                         return
                     elif rising(9):
                         self.trigger_input(lambda: setattr(self, 'fast_scroll_active', not self.fast_scroll_active))
@@ -731,41 +815,59 @@ class UmuInputEngineQt:
             view = self.app.current_view()
             cols = getattr(view, 'num_cols', 5)
             step = 5 if self.fast_scroll_active else 1
-            sidebar_offset = getattr(self, '_sidebar_btn_count', 0)
-            grid_count = num_widgets - sidebar_offset
-            if self.nav_index < sidebar_offset:
-                if move_y == 1 and self.nav_index == sidebar_offset - 1:
-                    new_index = sidebar_offset
-                elif move_y != 0:
-                    new_index = (self.nav_index + move_y) % sidebar_offset
-                elif move_x == 1:
-                    new_index = sidebar_offset
-                elif move_x == -1:
-                    new_index = sidebar_offset - 1
+            tabs = getattr(self, '_tabs_btn_count', 0)
+            header = getattr(view, '_header_nav', None) if view else None
+            header_count = len(header) if header else 0
+            grid_count = num_widgets - tabs - header_count
+            if grid_count <= 0:
+                new_index = self.nav_index
+            elif self.nav_index < tabs:
+                if move_x != 0:
+                    new_index = (self.nav_index + move_x) % tabs
+                elif move_y == 1:
+                    if getattr(self, '_tabs_active_idx', 0) != self.nav_index:
+                        self.app._activate_tab(self._tab_keys[self.nav_index])
+                    else:
+                        new_index = tabs
+                else:
+                    new_index = self.nav_index
+            elif self.nav_index < tabs + header_count:
+                rel = self.nav_index - tabs
+                if move_x != 0:
+                    new_index = tabs + ((rel + move_x) % header_count)
+                elif move_y == 1:
+                    new_index = tabs + header_count
+                elif move_y == -1:
+                    new_index = getattr(self, '_tabs_active_idx', 0)
                 else:
                     new_index = self.nav_index
             else:
-                rel_idx = self.nav_index - sidebar_offset
+                rel_idx = self.nav_index - tabs - header_count
                 if move_x != 0:
                     if self.fast_scroll_active:
                         new_rel = (rel_idx + (move_x * step * cols)) % grid_count
+                    elif move_x == -1 and rel_idx % cols == 0:
+                        new_rel = min(rel_idx + (cols - 1), grid_count - 1)
+                    elif move_x == 1 and rel_idx % cols == cols - 1:
+                        new_rel = max(rel_idx - (cols - 1), 0)
+                    elif move_x == 1 and rel_idx == grid_count - 1 and rel_idx % cols != cols - 1:
+                        new_rel = rel_idx - (rel_idx % cols)
                     else:
-                        new_rel = (rel_idx + move_x) % grid_count
-                    if move_x == -1 and not self.fast_scroll_active and sidebar_offset > 0 and rel_idx % cols == 0:
-                        new_index = sidebar_offset - 1
-                    else:
-                        new_index = sidebar_offset + new_rel
+                        new_rel = rel_idx + move_x
+                    new_index = tabs + header_count + new_rel
                 elif move_y != 0:
                     new_rel = rel_idx + (move_y * step * cols)
                     if new_rel < 0:
-                        if sidebar_offset > 0:
-                            new_index = sidebar_offset - 1
+                        if header_count:
+                            col = rel_idx % cols
+                            hidx = 0 if col == 0 else header_count - 1
+                            new_index = tabs + hidx
                         else:
-                            new_index = self.nav_index
+                            new_index = getattr(self, '_tabs_active_idx', 0)
                     elif new_rel >= grid_count:
                         new_index = self.nav_index
                     else:
-                        new_index = sidebar_offset + new_rel
+                        new_index = tabs + header_count + new_rel
         elif self._nav_mode == "modal":
             if move_x != 0 or move_y != 0:
                 new_index = (self.nav_index + (move_x or move_y)) % num_widgets
@@ -776,7 +878,18 @@ class UmuInputEngineQt:
         elif self._nav_mode == "keyboard":
             new_index = self._move_selection_keyboard(move_x, move_y)
         else:
-            if move_x != 0:
+            tabs = getattr(self, '_tabs_btn_count', 0)
+            if tabs and self.nav_index < tabs:
+                if move_x != 0:
+                    new_index = (self.nav_index + move_x) % tabs
+                elif move_y == 1:
+                    if getattr(self, '_tabs_active_idx', 0) != self.nav_index:
+                        self.app._activate_tab(self._tab_keys[self.nav_index])
+                    else:
+                        new_index = tabs
+                else:
+                    new_index = self.nav_index
+            elif move_x != 0:
                 cur = self.nav_list[self.nav_index]
                 if self._is_valid(cur):
                     cur_geo = cur.geometry()
@@ -786,6 +899,8 @@ class UmuInputEngineQt:
                     best_dist = float('inf')
                     for i, w in enumerate(self.nav_list):
                         if i == self.nav_index or not self._is_valid(w):
+                            continue
+                        if tabs and i < tabs:
                             continue
                         w_geo = w.geometry()
                         wx = w.mapToGlobal(w_geo.topLeft()).x()
@@ -800,13 +915,21 @@ class UmuInputEngineQt:
                             best_idx = i
                     new_index = best_idx if best_idx is not None else self.nav_index
             elif move_y != 0:
-                for step in range(1, num_widgets):
-                    idx = (self.nav_index + move_y * step) % num_widgets
-                    if self._is_valid(self.nav_list[idx]):
-                        new_index = idx
-                        break
+                if tabs and self.nav_index == tabs and move_y == -1:
+                    new_index = getattr(self, '_tabs_active_idx', 0)
                 else:
-                    new_index = self.nav_index
+                    content_count = num_widgets - tabs
+                    if content_count <= 0:
+                        new_index = self.nav_index
+                    else:
+                        start = self.nav_index - tabs if tabs else self.nav_index
+                        for step in range(1, content_count):
+                            idx = tabs + ((start + move_y * step) % content_count)
+                            if self._is_valid(self.nav_list[idx]):
+                                new_index = idx
+                                break
+                        else:
+                            new_index = self.nav_index
             else:
                 new_index = self.nav_index
 
@@ -899,6 +1022,3 @@ class UmuInputEngineQt:
             return widgets.index(best)
         except ValueError:
             return self.nav_index
-
-    def _toggle_sidebar(self):
-        self.app._toggle_sidebar_visibility()

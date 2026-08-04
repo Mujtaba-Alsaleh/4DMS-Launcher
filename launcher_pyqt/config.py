@@ -54,6 +54,8 @@ class ConfigManager:
 
     def _migrate(self, data):
         now = str(time.time())
+        settings = data.setdefault("settings", {})
+        settings.setdefault("default_proton", "")
         for g_id, g_data in data.items():
             if g_id == "settings" or not isinstance(g_data, dict):
                 continue
@@ -64,3 +66,4 @@ class ConfigManager:
             g_data.setdefault("notes", "")
             g_data.setdefault("rating", 0)
             g_data.setdefault("livesplit", False)
+            g_data.setdefault("art_land", "")

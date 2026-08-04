@@ -89,13 +89,16 @@ class EditorView(QWidget):
         layout.addWidget(umu_lbl)
         store_row = QHBoxLayout()
         self.e_proton = QComboBox()
+        self.e_proton.addItem("Use Default")
         self.e_proton.addItem("Default (UMU Internal)")
         for p in sorted(self.app.proton_paths.keys(), key=str.lower):
-            self.e_proton.addItem(p)
-        current = data.get("proton", "Default (UMU Internal)")
-        idx = self.e_proton.findText(current)
-        if idx >= 0:
-            self.e_proton.setCurrentIndex(idx)
+            if p != "Default (UMU Internal)":
+                self.e_proton.addItem(p)
+        current = data.get("proton", "")
+        if current:
+            idx = self.e_proton.findText(current)
+            if idx >= 0:
+                self.e_proton.setCurrentIndex(idx)
         self.e_proton.setStyleSheet(f"""
             QComboBox {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 12px;
                          border-radius: 6px; padding: 8px; }}
@@ -308,6 +311,34 @@ class EditorView(QWidget):
             QTimer.singleShot(0, app.handle_back)
         app.create_pfx_menu(finish_callback=_on_pfx_done)
 
+    def refresh(self):
+        """Re-sync widget states from config_data (quick-settings toggles may
+        have changed values since this cached view was built)."""
+        data = self.app.config_data.get(self.game_id, {})
+        self.gs_on_var = bool(data.get('gs_on', False))
+        if getattr(self, 'gs_toggle_btn', None):
+            self.gs_toggle_btn.setText("ON" if self.gs_on_var else "OFF")
+            self.gs_toggle_btn.setStyleSheet(self._toggle_style(self.gs_on_var))
+        self.useMangoHud = bool(data.get('useMangoHud', False))
+        if getattr(self, 'useMangoHudToggle', None):
+            self.useMangoHudToggle.setText("ON" if self.useMangoHud else "OFF")
+            self.useMangoHudToggle.setStyleSheet(self._toggle_style(self.useMangoHud))
+        self.useLiveSplit = bool(data.get('livesplit', False))
+        if getattr(self, 'useLiveSplitToggle', None):
+            self.useLiveSplitToggle.setText("ON" if self.useLiveSplit else "OFF")
+            self.useLiveSplitToggle.setStyleSheet(self._toggle_style(self.useLiveSplit))
+        if self.app.runningOnGamescope and getattr(self, 'useLiveSplitToggle', None):
+            self.useLiveSplitToggle.setEnabled(False)
+        if getattr(self, 'gs_w', None):
+            self.gs_w.setText(str(data.get('gs_w', '1280')))
+        if getattr(self, 'gs_h', None):
+            self.gs_h.setText(str(data.get('gs_h', '720')))
+        cur = data.get("proton", "") or ""
+        if cur and getattr(self, 'e_proton', None):
+            idx = self.e_proton.findText(cur)
+            if idx >= 0:
+                self.e_proton.setCurrentIndex(idx)
+
     def save(self):
         data = self.app.config_data[self.game_id]
         gs_active = self.gs_on_var
@@ -324,7 +355,7 @@ class EditorView(QWidget):
             "name": self.e_name.text(),
             "exe": self.e_exe_lbl.text(),
             "prefix": self.e_prefix_lbl.text(),
-            "proton": self.e_proton.currentText(),
+            "proton": "" if self.e_proton.currentText() == "Use Default" else self.e_proton.currentText(),
             "gs_on": gs_active,
             "gs_w": self.gs_w.text(),
             "gs_h": self.gs_h.text(),

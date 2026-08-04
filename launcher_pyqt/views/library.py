@@ -1,14 +1,11 @@
-import time, os
+import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-                             QScrollArea, QGridLayout, QLineEdit, QComboBox)
+                             QScrollArea, QGridLayout, QLineEdit, QPushButton)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, pyqtProperty, QRectF
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QPainterPath
 from launcher_pyqt.artworkImage import GameImage
-from launcher_pyqt.utils import format_playtime, relative_time
+from launcher_pyqt.utils import format_playtime
 import colors as c
-
-SORT_OPTIONS = ["Last Played", "Name", "Play Count", "Date Added"]
-FILTER_OPTIONS = ["All", "Favorites", "Recent"]
 
 
 class PosterWidget(QWidget):
@@ -26,7 +23,7 @@ class PosterWidget(QWidget):
         self.setFixedSize(w, h)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        art = data.get("art")
+        art = data.get("art") or data.get("art_land")
         if art and os.path.exists(art):
             self.bg_pix = QPixmap(art)
             if not self.bg_pix.isNull():
@@ -140,8 +137,6 @@ class LibraryView(QWidget):
         super().__init__()
         self.app = app
         self.setStyleSheet("background: transparent;")
-        self.sort_mode = "Last Played"
-        self.filter_mode = "All"
         self.grid = None
         self._scroll_area = None
         self._layout = QVBoxLayout(self)
@@ -186,7 +181,7 @@ class LibraryView(QWidget):
         for gid, d in sorted(self.app.config_data.items()):
             if gid == "settings":
                 continue
-            parts.append((gid, d.get("name"), d.get("art"),
+            parts.append((gid, d.get("name"), d.get("art"), d.get("art_land"),
                           d.get("playtime"), d.get("last_played"),
                           d.get("favorite"), d.get("launch_count")))
         return tuple(parts)
@@ -200,20 +195,7 @@ class LibraryView(QWidget):
         q = self.search_text.strip().lower()
         if q:
             games = [(g_id, d) for g_id, d in games if q in d.get("name", "").lower()]
-        if self.filter_mode == "Favorites":
-            games = [(g_id, d) for g_id, d in games if d.get("favorite")]
-        elif self.filter_mode == "Recent":
-            cutoff = time.time() - (7 * 86400)
-            games = [(g_id, d) for g_id, d in games
-                     if d.get("last_played") and float(d.get("last_played", "0")) > cutoff]
-        if self.sort_mode == "Name":
-            games.sort(key=lambda g: g[1].get("name", "").lower())
-        elif self.sort_mode == "Play Count":
-            games.sort(key=lambda g: g[1].get("launch_count", 0), reverse=True)
-        elif self.sort_mode == "Date Added":
-            games.sort(key=lambda g: g[1].get("added_at", "0"), reverse=True)
-        else:
-            games.sort(key=lambda g: g[1].get("last_played", "0"), reverse=True)
+        games.sort(key=lambda g: g[1].get("name", "").lower())
         return games
 
     def _build(self):
@@ -239,31 +221,18 @@ class LibraryView(QWidget):
         self._search.textChanged.connect(self._on_search_changed)
         header.addWidget(self._search, 1)
 
-        combo_style = f"""
-            QComboBox {{ background: {c.BG_INPUT}; color: {c.TXT_MAIN}; font: 12px;
-                         border-radius: 8px; padding: 5px 10px;
-                         border: 1px solid {c.BG_INPUT}; }}
-            QComboBox:hover {{ border: 1px solid {c.ACCENT}; }}
-            QComboBox::drop-down {{ border: none; width: 20px; }}
-            QComboBox QAbstractItemView {{ background: {c.BG_PANEL}; color: {c.TXT_MAIN};
-                                             selection-background-color: {c.ACCENT}; }}
-        """
+        add_btn = QPushButton("+")
+        add_btn.setToolTip("Add a game")
+        add_btn.setFixedSize(34, 34)
+        add_btn.setStyleSheet(f"""
+            QPushButton {{ background: {c.SUCCESS}; color: #ffffff; font: bold 20px;
+                           border-radius: 17px; border: none; }}
+            QPushButton:hover {{ background: {c.ACCENT_HOVER}; }}
+        """)
+        add_btn.clicked.connect(self.app.open_add_game)
+        header.addWidget(add_btn)
 
-        self.sort_combo = QComboBox()
-        self.sort_combo.addItems(SORT_OPTIONS)
-        self.sort_combo.setCurrentText(self.sort_mode)
-        self.sort_combo.setFixedHeight(34)
-        self.sort_combo.setStyleSheet(combo_style)
-        self.sort_combo.currentTextChanged.connect(self._on_sort_changed)
-        header.addWidget(self.sort_combo)
-
-        self.filter_combo = QComboBox()
-        self.filter_combo.addItems(FILTER_OPTIONS)
-        self.filter_combo.setCurrentText(self.filter_mode)
-        self.filter_combo.setFixedHeight(34)
-        self.filter_combo.setStyleSheet(combo_style)
-        self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
-        header.addWidget(self.filter_combo)
+        self._header_nav = [self._search, add_btn]
 
         self._stats_lbl = QLabel()
         self._stats_lbl.setStyleSheet(f"color: {c.TXT_DIM}; font: 11px; background: transparent;")
@@ -299,56 +268,11 @@ class LibraryView(QWidget):
         scroll_layout.setContentsMargins(20, 10, 20, 20)
         scroll_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        recent_games = []
-        if self.sort_mode == "Last Played" and self.filter_mode == "All":
-            recent_games = [(g_id, d) for g_id, d in games if d.get("last_played")][:5]
-
-        if recent_games:
-            recent_lbl = QLabel("RECENTLY PLAYED")
-            recent_lbl.setStyleSheet(f"color: {c.ACCENT}; font: bold 12px;")
-            scroll_layout.addWidget(recent_lbl)
-
-            recent_row = QHBoxLayout()
-            recent_row.setSpacing(4)
-            rp_w = 80
-            rp_h = int(rp_w * 1.43)
-            for g_id, data in recent_games:
-                card = QWidget()
-                card.setStyleSheet("background: transparent;")
-                card_layout = QVBoxLayout(card)
-                card_layout.setContentsMargins(0, 0, 0, 0)
-                card_layout.setSpacing(4)
-                card_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-                poster = PosterWidget(g_id, data, rp_w, rp_h)
-                poster.set_running(g_id == self.app.game_process_manager.current_running_game_id)
-                poster.clicked.connect(self._quick_launch)
-                poster.right_clicked.connect(self.app.show_dashboard)
-                card_layout.addWidget(poster)
-
-                name_lbl = QLabel(data.get('name', '').upper())
-                name_lbl.setStyleSheet(f"color: {c.TXT_MAIN}; font: bold 8px;")
-                name_lbl.setWordWrap(True)
-                name_lbl.setFixedWidth(rp_w)
-                card_layout.addWidget(name_lbl)
-
-                rt = relative_time(data.get('last_played'))
-                if rt:
-                    time_lbl = QLabel(rt)
-                    time_lbl.setStyleSheet(f"color: {c.TXT_DIM}; font: 7px;")
-                    card_layout.addWidget(time_lbl)
-
-                recent_row.addWidget(card)
-            recent_row_w = QWidget()
-            recent_row_w.setLayout(recent_row)
-            scroll_layout.addWidget(recent_row_w)
-            scroll_layout.addSpacing(10)
-
         self.grid = QWidget()
         self.grid.setStyleSheet("background: transparent;")
         grid_layout = QGridLayout(self.grid)
         grid_layout.setSpacing(12)
-        sidebar_w = 280 if self.app._sidebar.isVisible() else 0
+        sidebar_w = 0
         avail = max(400, self.app._content_area.width() - sidebar_w - 40)
         spacing = 12
         poster_w = min(170, max(130, (avail - spacing * 3) // 5))
@@ -366,7 +290,7 @@ class LibraryView(QWidget):
 
             poster = PosterWidget(g_id, data, poster_w, poster_h)
             poster.set_running(g_id == self.app.game_process_manager.current_running_game_id)
-            poster.clicked.connect(self._quick_launch)
+            poster.clicked.connect(self.app.show_dashboard)
             poster.right_clicked.connect(self.app.show_dashboard)
             card_layout.addWidget(poster)
 
@@ -392,10 +316,6 @@ class LibraryView(QWidget):
 
         if self.app.engine:
             QTimer.singleShot(0, self.app.engine.rescan)
-
-    def _quick_launch(self, game_id):
-        self.app.current_game_id = game_id
-        self.app.game_process_manager.try_launch()
 
     def _animate_scroll(self, target_value):
         if not self._scroll_area:
@@ -432,17 +352,37 @@ class LibraryView(QWidget):
                     return
                 self._animate_scroll(target_val)
 
-    def cycle_sort(self):
-        idx = SORT_OPTIONS.index(self.sort_mode) if self.sort_mode in SORT_OPTIONS else 0
-        self.sort_mode = SORT_OPTIONS[(idx + 1) % len(SORT_OPTIONS)]
-        self.sort_combo.setCurrentText(self.sort_mode)
-        self.app.toast.show(f"Sort: {self.sort_mode}")
-
-    def cycle_filter(self):
-        idx = FILTER_OPTIONS.index(self.filter_mode) if self.filter_mode in FILTER_OPTIONS else 0
-        self.filter_mode = FILTER_OPTIONS[(idx + 1) % len(FILTER_OPTIONS)]
-        self.filter_combo.setCurrentText(self.filter_mode)
-        self.app.toast.show(f"Filter: {self.filter_mode}")
+    def scroll_to_letter(self, letter):
+        letter = letter.lower()
+        for i, card in enumerate(self._cards):
+            poster = card.findChild(PosterWidget)
+            if not poster or not poster.game_id:
+                continue
+            name = self.app.config_data.get(poster.game_id, {}).get("name", "").lower()
+            if name.startswith(letter):
+                if self._scroll_area:
+                    sb = self._scroll_area.verticalScrollBar()
+                    origin = card.mapTo(self._scroll_area.widget(), card.rect().topLeft())
+                    top_y = origin.y()
+                    bottom_y = origin.y() + card.height()
+                    view_h = self._scroll_area.viewport().height()
+                    val = sb.value()
+                    margin = 60
+                    if top_y < val + margin:
+                        target_val = max(0, top_y - margin)
+                    elif bottom_y > val + view_h - margin:
+                        target_val = min(sb.maximum(), bottom_y - view_h + margin)
+                    else:
+                        target_val = None
+                    if target_val is not None:
+                        self._animate_scroll(target_val)
+                if self.app.engine:
+                    tabs = getattr(self.app.engine, '_tabs_btn_count', 0)
+                    header = getattr(self, '_header_nav', None) or []
+                    base = tabs + len(header)
+                    self.app.engine.nav_index = min(base + i, max(0, len(self.app.engine.nav_list) - 1))
+                    self.app.engine.sync_visuals()
+                break
 
     def _on_search_changed(self, text):
         had_focus = hasattr(self, '_search') and self._search.hasFocus()
@@ -467,24 +407,11 @@ class LibraryView(QWidget):
             if sb.maximum() >= scroll:
                 sb.setValue(scroll)
 
-    def _on_sort_changed(self, text):
-        self.sort_mode = text
-        self._rebuild()
-
-    def _on_filter_changed(self, text):
-        self.filter_mode = text
-        self._rebuild()
-
     def toggle_favorite(self):
-        if not self.app.current_game_id:
+        gid = self.app._focused_game_id()
+        if not gid:
             return
-        game_id = self.app.current_game_id
-        current = self.app.config_data[game_id].get("favorite", False)
-        self.app.config_data[game_id]["favorite"] = not current
-        self.app.config_manager.save_data(self.app.config_data)
-        state = "added to" if not current else "removed from"
-        self.app.toast.show(f"Favorites: {state}")
-        self._rebuild()
+        self.app.toggle_favorite_for(gid)
 
     def _rebuild(self):
         while self._layout.count():

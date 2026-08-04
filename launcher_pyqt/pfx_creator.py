@@ -6,6 +6,70 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
 from PyQt6.QtCore import QTimer, pyqtSignal
 import colors as c
 
+DEP_NAMES = ["vcrun2022", "dotnet48", "corefonts", "d3dx9", "faudio",
+             "xna40", "physx"]
+
+
+def create_wine_prefix(prefix, deps, log=None):
+    """Create a wine prefix at `prefix` and install `deps` (winetricks names).
+
+    Blocking — call from a background thread. Returns True on success, False
+    on error. `log` is an optional callable(line) sink for progress.
+    """
+    if log is None:
+        def log(_s): pass
+    os.makedirs(prefix, exist_ok=True)
+    env = os.environ.copy()
+    env["WINEPREFIX"] = prefix
+    env["WINEARCH"] = "win64"
+
+    log("=" * 50)
+    log("Starting Wine Prefix Creation")
+    log("=" * 50)
+    log(f"Path: {prefix}")
+    log("Architecture: win64\n")
+
+    log("[Step 1/2] Creating Wine Prefix...")
+    try:
+        proc = subprocess.Popen(
+            ["wineboot", "--init"], env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1
+        )
+        for line in proc.stdout:
+            log(line.strip())
+        proc.wait()
+        if proc.returncode != 0:
+            log("Error creating prefix.")
+            return False
+        log("Prefix created successfully.\n")
+    except Exception as e:
+        log(f"Error: {str(e)}")
+        return False
+
+    if not deps:
+        log("No dependencies selected. Done.")
+        return True
+
+    log(f"[Step 2/2] Installing: {', '.join(deps)}\n")
+    try:
+        proc = subprocess.Popen(
+            ["winetricks"] + list(deps), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, bufsize=1
+        )
+        for line in proc.stdout:
+            log(line.strip())
+        proc.wait()
+        if proc.returncode == 0:
+            log("\nInstallation Complete!")
+            return True
+        log("\nFinished with errors.")
+        return False
+    except Exception as e:
+        log(f"Error: {str(e)}")
+        return False
+
 
 class PrefixCreator(QWidget):
     log_signal = pyqtSignal(str)
