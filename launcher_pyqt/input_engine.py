@@ -524,6 +524,12 @@ class UmuInputEngineQt:
         if prev_focus is not None and prev_focus is not target and prev_focus not in self.nav_list:
             self._clear_focus(prev_focus)
         self._prev_focus_target = target
+        try:
+            nf = getattr(self.app, '_on_nav_focus', None)
+            if nf is not None:
+                nf(target)
+        except RuntimeError:
+            pass
         view_state = getattr(self.app, 'view_state', '')
 
         if view_state in ("library", "home"):
@@ -585,7 +591,16 @@ class UmuInputEngineQt:
     def _ensure_scrolled(self, widget):
         """Scroll any QScrollArea ancestor so the focused widget is visible.
         Programmatic setFocus() does NOT auto-scroll scroll areas, so nav
-        could land on (and click) buttons that are off-screen."""
+        could land on (and click) buttons that are off-screen. Home carousel
+        posters animate instead (see HomeView._scroll_to_poster)."""
+        if getattr(self.app, 'view_state', '') == "home" and hasattr(widget, 'game_id'):
+            try:
+                v = self.app.current_view()
+                if v is not None and hasattr(v, '_scroll_to_poster'):
+                    v._scroll_to_poster(widget)
+                    return
+            except RuntimeError:
+                pass
         p = widget.parentWidget()
         while p is not None:
             try:

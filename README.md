@@ -35,6 +35,27 @@ pip install -r requirements.txt
 python launcher_pyqt/main.py
 ```
 
+## Build (optional, single executable)
+
+Create a standalone binary from a fresh venv in one go — installs the runtime deps plus PyInstaller, then builds:
+
+```bash
+cd 4DMS-Launcher
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt pyinstaller && \
+pyinstaller --onefile --noconsole --clean --noconfirm \
+  --paths . \
+  --name "4DMS Launcher" \
+  --add-data "resources:resources" \
+  --collect-submodules launcher_pyqt \
+  --hidden-import colors \
+  --hidden-import livesplit \
+  launcher_pyqt/main.py
+```
+
+The result is a single self-contained executable at `dist/4DMS Launcher` (no console window, no Python install needed on the target machine). To rebuild after changes, just re-run the `pyinstaller` line — `--clean --noconfirm` clears the previous `build/` cache and overwrites the output. (Note: `--add-data` uses `:` on Linux; use `;` if building on Windows.)
+
 ## Project Structure
 
 ```

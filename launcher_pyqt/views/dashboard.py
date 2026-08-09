@@ -541,13 +541,22 @@ class DashboardView(QWidget):
         """)
         play_btn.clicked.connect(lambda: self.app.try_launch_game())
         self.app.play_btn = play_btn
-        if self.app.game_process_manager.is_playing and self.app.current_game_id == self.game_id:
-            play_btn.setText("STOP")
-            play_btn.setStyleSheet(f"""
-                QPushButton {{ background: {c.DANGER}; color: white; font: bold 18px;
-                               border-radius: 10px; }}
-                QPushButton:hover {{ background: {c.get_dimmed_accent(c.DANGER, 0.8)}; }}
-            """)
+        gpm = self.app.game_process_manager
+        if gpm.is_playing and self.app.current_game_id == self.game_id:
+            if getattr(gpm, 'launching', False):
+                play_btn.setText("LAUNCHING\u2026")
+                play_btn.setStyleSheet(f"""
+                    QPushButton {{ background: #f39c12; color: white; font: bold 18px;
+                                   border-radius: 10px; }}
+                    QPushButton:hover {{ background: #e67e22; }}
+                """)
+            else:
+                play_btn.setText("STOP")
+                play_btn.setStyleSheet(f"""
+                    QPushButton {{ background: {c.DANGER}; color: white; font: bold 18px;
+                                   border-radius: 10px; }}
+                    QPushButton:hover {{ background: {c.get_dimmed_accent(c.DANGER, 0.8)}; }}
+                """)
         cv.addWidget(play_btn)
 
         def accent_btn(text, color, font_size=11):

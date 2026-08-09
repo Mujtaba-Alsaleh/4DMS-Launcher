@@ -26,6 +26,7 @@ from launcher_pyqt.controller_confirm_modal import ControllerConfirmModal
 from launcher_pyqt.controller_file_browser import ControllerFileBrowser
 from launcher_pyqt.on_screen_keyboard import OnScreenKeyboard
 from launcher_pyqt.quick_settings import QuickSettingsOverlay
+from launcher_pyqt.launch_status import LaunchStatusOverlay
 
 HINT_DEFS = {
     "home": [("A", "Open"), ("MENU", "Launch"), ("X", "Quick-Set"), ("Y", "Fav"), ("LB/RB", "Tabs"), ("View", "Hold-Quit")],
@@ -74,6 +75,7 @@ class LauncherWindow(QMainWindow):
         self.engine = UmuInputEngineQt(self)
         self.on_screen_keyboard = OnScreenKeyboard(self._content_area, self)
         self.quick_settings = QuickSettingsOverlay(self)
+        self.launch_status = LaunchStatusOverlay(self)
         self._add_game_modal = None
 
         self.show_home()
@@ -231,6 +233,20 @@ class LauncherWindow(QMainWindow):
             except RuntimeError:
                 pass
         return getattr(self, 'current_game_id', None)
+
+    def _on_nav_focus(self, widget):
+        try:
+            v = self.current_view()
+        except RuntimeError:
+            return
+        if v is None:
+            return
+        m = getattr(v, '_on_nav_focus', None)
+        if m is not None:
+            try:
+                m(widget)
+            except RuntimeError:
+                pass
 
     def _kb_start(self):
         """R = Start/MENU: quick-launch the focused/current game."""

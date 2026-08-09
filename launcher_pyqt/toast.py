@@ -18,6 +18,7 @@ class ToastManager:
         """)
         toast.adjustSize()
         toast.raise_()
+        toast.show()
         effect = QGraphicsOpacityEffect(toast)
         effect.setOpacity(0.0)
         toast.setGraphicsEffect(effect)

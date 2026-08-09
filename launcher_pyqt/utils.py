@@ -1,5 +1,6 @@
 import os
 import re
+import sys
 import time
 
 from PyQt6.QtGui import QPixmap
@@ -12,8 +13,9 @@ def normalize(text):
 
 
 def resource_path(relative_path):
-    if "__compiled__" in globals():
-        return os.path.join(os.path.dirname(__file__), relative_path)
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(base, relative_path)
     return os.path.join(os.path.abspath("."), relative_path)
 
 

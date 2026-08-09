@@ -2,8 +2,9 @@
 import os
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QScrollArea)
-from PyQt6.QtCore import Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QPen, QPainterPath, QLinearGradient
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPropertyAnimation, QEasingCurve, pyqtProperty, QEvent
+from PyQt6.QtGui import (QPixmap, QPainter, QColor, QPen, QPainterPath,
+                         QLinearGradient, QImage)
 from launcher_pyqt.artworkImage import GameImage
 import colors as c
 
@@ -134,7 +135,6 @@ class FeaturedPoster(QPushButton):
             p.drawEllipse(int(draw_rect.center().x() - wz * 0.22),
                           int(draw_rect.top() - hz * 0.15),
                           int(wz * 0.44), int(wz * 0.44))
-        p.setClipping(False)
         scrim = QLinearGradient(0, draw_rect.bottom() - hz * 0.42, 0, draw_rect.bottom())
         scrim.setColorAt(0.0, QColor(0, 0, 0, 0))
         scrim.setColorAt(1.0, QColor(0, 0, 0, 170))
@@ -149,6 +149,7 @@ class FeaturedPoster(QPushButton):
             p.drawText(QRectF(draw_rect.left() + 16, draw_rect.bottom() - 40,
                               draw_rect.width() - 32, 28),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.name)
+        p.setClipping(False)
         if self.is_running:
             badge_h = 18
             badge_w = int(badge_h * 5.0)
@@ -178,6 +179,7 @@ class HomePoster(QPushButton):
         self.game_id = g_id
         self._focused = False
         self.is_running = False
+        self.name = data.get("name", "")
         _zoom_mixin_setup(self, w, h)
         art = data.get("art") or data.get("art_land")
         self.bg_pix = None
@@ -231,11 +233,33 @@ class HomePoster(QPushButton):
                 Qt.TransformationMode.SmoothTransformation)
             p.drawPixmap(draw_rect.toRect(), scaled)
         else:
-            p.setPen(QColor(c.TXT_DIM))
+            grad = QLinearGradient(0, 0, wz, hz)
+            grad.setColorAt(0.0, QColor(c.ACCENT).darker(220))
+            grad.setColorAt(0.6, QColor(c.BG_PANEL))
+            p.fillRect(draw_rect, grad)
+            glow = QColor(c.ACCENT)
+            glow.setAlpha(50)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(glow)
+            p.drawEllipse(int(draw_rect.center().x() - wz * 0.3),
+                          int(draw_rect.top() - hz * 0.12),
+                          int(wz * 0.6), int(wz * 0.6))
+        if self.name:
+            scrim = QLinearGradient(0, draw_rect.bottom() - hz * 0.32, 0, draw_rect.bottom())
+            scrim.setColorAt(0.0, QColor(0, 0, 0, 0))
+            scrim.setColorAt(1.0, QColor(0, 0, 0, 160))
+            p.fillRect(QRectF(draw_rect.left(), draw_rect.bottom() - hz * 0.32,
+                              draw_rect.width(), hz * 0.32), scrim)
             font = p.font()
-            font.setPointSize(int(26 * z))
+            font.setPointSize(int(11 * z))
+            font.setBold(True)
             p.setFont(font)
-            p.drawText(draw_rect, Qt.AlignmentFlag.AlignCenter, "\U0001f3ae")
+            elided = p.fontMetrics().elidedText(self.name, Qt.TextElideMode.ElideRight,
+                                                int(draw_rect.width() - 16))
+            p.setPen(QColor("#ffffff"))
+            p.drawText(QRectF(draw_rect.left() + 8, draw_rect.bottom() - 22,
+                              draw_rect.width() - 16, 16),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, elided)
         p.setClipping(False)
         if self._focused:
             p.setPen(QPen(QColor(c.ACCENT), max(1, int(3 * z))))
@@ -332,6 +356,117 @@ class BrowsePoster(QPushButton):
         p.end()
 
 
+class HomeBackdrop(QWidget):
+    """Steam-style ambient backdrop: blurred art of the focused game, dimmed,
+    behind the whole Home view. Blur = cheap downscale-upscale (no
+    QGraphicsBlurEffect); crossfades via a paint-driven `fade` property."""
+
+    _FADE_MS = 180
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+        self._art = None
+        self._scaled = None
+        self._scaled_vw = None
+        self._fade = 0.0
+        self._fade_anim = None
+        self._cache = {}
+
+    def _get_fade(self):
+        return self._fade
+
+    def _set_fade(self, v):
+        self._fade = v
+        self.update()
+
+    fade = pyqtProperty(float, _get_fade, _set_fade)
+
+    def _blur_pixmap(self, path):
+        img = QImage(path)
+        if img.isNull():
+            return None
+        small = img.scaled(220, max(1, int(220 * img.height() / max(1, img.width()))),
+                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                           Qt.TransformationMode.SmoothTransformation)
+        return QPixmap.fromImage(small)
+
+    def set_game(self, gid, data):
+        target = None
+        if gid and data:
+            art = data.get("art_land") or data.get("art")
+            if art and os.path.exists(art):
+                pix = self._cache.get(gid)
+                if pix is None:
+                    pix = self._blur_pixmap(art)
+                    self._cache[gid] = pix
+                target = pix
+        if target is self._art:
+            return
+        self._art = target
+        self._scaled = None
+        self._scaled_vw = None
+        self._animate_fade(1.0 if target is not None else 0.0)
+
+    def invalidate_cache(self):
+        self._scaled = None
+        self._scaled_vw = None
+
+    def _scaled_for(self, w, h):
+        art = self._art
+        if art is None or art.isNull() or w <= 0 or h <= 0:
+            return None
+        s = self._scaled
+        if s is not None and self._scaled_vw == (w, h):
+            return s
+        s = art.scaled(w, h,
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation)
+        self._scaled = s
+        self._scaled_vw = (w, h)
+        return s
+
+    def _animate_fade(self, value):
+        anim = getattr(self, '_fade_anim', None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
+        self._fade_anim = QPropertyAnimation(self, b"fade")
+        self._fade_anim.setDuration(self._FADE_MS)
+        self._fade_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._fade_anim.setStartValue(self._fade)
+        self._fade_anim.setEndValue(value)
+        self._fade_anim.start()
+
+    def stop_animations(self):
+        anim = getattr(self, '_fade_anim', None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
+        self._fade_anim = None
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(c.BG_MAIN))
+        if self._art is not None and not self._art.isNull() and self._fade > 0.01:
+            r = self.rect()
+            scaled = self._scaled_for(r.width(), r.height())
+            if scaled is not None:
+                p.setOpacity(self._fade * 0.5)
+                p.drawPixmap((r.width() - scaled.width()) // 2,
+                             (r.height() - scaled.height()) // 2, scaled)
+                p.setOpacity(1.0)
+        scrim = QColor(c.BG_MAIN)
+        scrim.setAlpha(175)
+        p.fillRect(self.rect(), scrim)
+        p.end()
+
+
 class HomeView(QWidget):
     _reflow_on_resize = True
 
@@ -339,6 +474,8 @@ class HomeView(QWidget):
         super().__init__()
         self.app = app
         self._sig = None
+        self._backdrop = HomeBackdrop(self)
+        self._backdrop.lower()
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(28, 20, 28, 20)
         self._layout.setSpacing(12)
@@ -373,6 +510,10 @@ class HomeView(QWidget):
 
     def hideEvent(self, event):
         super().hideEvent(event)
+        try:
+            self._backdrop.stop_animations()
+        except RuntimeError:
+            pass
         for w in self.findChildren(HomePoster):
             w.stop_animations()
         for w in self.findChildren(FeaturedPoster):
@@ -387,11 +528,51 @@ class HomeView(QWidget):
             if w:
                 w.deleteLater()
 
+    _FIXED_OVERHEAD = 155
+
+    def _avail_carousel_h(self):
+        ca = getattr(self, '_carousel_area', None)
+        if ca is not None:
+            try:
+                if ca.height() > 0:
+                    return ca.height()
+            except RuntimeError:
+                pass
+        view_h = self.height()
+        if view_h <= 0:
+            try:
+                view_h = self.app._content_area.height() - 36
+            except RuntimeError:
+                view_h = 600
+        return max(200, view_h - self._FIXED_OVERHEAD)
+
+    def _carousel_sizes(self):
+        avail = self._avail_carousel_h()
+        ch = min(430, max(220, int(avail * 0.55)))
+        try:
+            content_w = self.app._content_area.width()
+        except RuntimeError:
+            content_w = self.width()
+        cw = min(int(ch / 1.4), max(130, content_w // 5))
+        if cw < int(ch / 1.4):
+            ch = int(cw * 1.4)
+        return cw, ch
+
     def _build(self):
         self._sig = self._data_sig()
         self._clear_layout()
+        self._carousel_area = None
+        self._carousel_inner = None
+        self._ch_used = 0
 
         self.setStyleSheet(f"background: {c.BG_MAIN};")
+
+        if getattr(self, '_backdrop', None) is not None:
+            try:
+                self._backdrop.lower()
+                self._backdrop.setGeometry(self.rect())
+            except RuntimeError:
+                pass
 
         title = QLabel("Home")
         title.setStyleSheet(
@@ -426,43 +607,8 @@ class HomeView(QWidget):
             lbl.setStyleSheet(f"color: {c.ACCENT}; font: bold 12px; background: transparent;")
             self._layout.addWidget(lbl)
 
-            self._carousel_area = QScrollArea()
-            self._carousel_area.setWidgetResizable(False)
-            self._carousel_area.setHorizontalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._carousel_area.setVerticalScrollBarPolicy(
-                Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._carousel_area.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-            inner = QWidget()
-            inner.setStyleSheet("background: transparent;")
-            row = QHBoxLayout(inner)
-            row.setContentsMargins(0, 0, 0, 0)
-            row.setSpacing(12)
-            row.addStretch(1)
-            cw = min(180, max(130, self.app._content_area.width() // 6))
-            ch = int(cw * 1.4)
-            total = 0
-            for idx, (g_id, data) in enumerate(recents):
-                if idx == 0:
-                    fw = int(ch * 2.6)
-                    poster = FeaturedPoster(g_id, data, fw, ch)
-                    total += fw
-                else:
-                    poster = HomePoster(g_id, data, cw, ch)
-                    total += cw
-                poster.clicked.connect(lambda checked=False, gid=g_id: self.app.show_dashboard(gid))
-                row.addWidget(poster)
-                if idx < len(recents) - 1:
-                    total += 12
-            browse = BrowsePoster(cw, ch)
-            browse.clicked.connect(self.app.show_library)
-            row.addWidget(browse)
-            total += cw + 12
-            row.addStretch(1)
-            self._carousel_total = total
-            self._carousel_inner = inner
-            self._carousel_area.setWidget(inner)
-            self._layout.addWidget(self._carousel_area, 1)
+            cw, ch = self._carousel_sizes()
+            self._build_carousel(cw, ch)
             QTimer.singleShot(0, self._center_carousel)
         else:
             self._carousel_area = None
@@ -506,6 +652,164 @@ class HomeView(QWidget):
     def _rebuild(self):
         self._build()
 
+    def _build_carousel(self, cw, ch):
+        recents = self._recent_games()
+        if not recents:
+            return
+        ca = getattr(self, '_carousel_area', None)
+        if ca is None:
+            ca = QScrollArea()
+            ca.setWidgetResizable(False)
+            ca.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            ca.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            ca.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+            self._carousel_area = ca
+            self._layout.addWidget(ca, 1)
+        old_inner = ca.widget()
+        if old_inner is not None:
+            old_inner.deleteLater()
+        inner = QWidget()
+        inner.setStyleSheet("background: transparent;")
+        row = QHBoxLayout(inner)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        row.addStretch(1)
+        total = 0
+        for idx, (g_id, data) in enumerate(recents):
+            if idx == 0:
+                fw = int(ch * 2.6)
+                poster = FeaturedPoster(g_id, data, fw, ch)
+                total += fw
+            else:
+                poster = HomePoster(g_id, data, cw, ch)
+                total += cw
+            poster.clicked.connect(lambda checked=False, gid=g_id: self.app.show_dashboard(gid))
+            row.addWidget(poster, 0, Qt.AlignmentFlag.AlignVCenter)
+            if idx < len(recents) - 1:
+                total += 12
+        browse = BrowsePoster(cw, ch)
+        browse.clicked.connect(self.app.show_library)
+        row.addWidget(browse, 0, Qt.AlignmentFlag.AlignVCenter)
+        total += cw + 12
+        row.addStretch(1)
+        self._carousel_total = total
+        self._carousel_inner = inner
+        self._ch_used = ch
+        self._cw_used = cw
+        ca.setWidget(inner)
+        try:
+            ca.removeEventFilter(self)
+        except RuntimeError:
+            pass
+        ca.installEventFilter(self)
+        self._update_running_badges()
+
+    def eventFilter(self, obj, event):
+        if obj is getattr(self, '_carousel_area', None) and event.type() == QEvent.Type.Resize:
+            inner = getattr(self, '_carousel_inner', None)
+            if inner is not None:
+                try:
+                    vh = obj.viewport().height()
+                    if vh > 0 and inner.height() != vh:
+                        inner.setFixedHeight(vh)
+                except RuntimeError:
+                    pass
+        return False
+
+    def _reflow_carousel(self):
+        ca = getattr(self, '_carousel_area', None)
+        if ca is None or getattr(self, '_sig', None) is None:
+            return
+        cw, ch = self._carousel_sizes()
+        if abs(ch - getattr(self, '_ch_used', 0)) <= 8:
+            return
+        focus_gid = None
+        try:
+            focus_gid = self.app._focused_game_id()
+        except RuntimeError:
+            pass
+        self._build_carousel(cw, ch)
+        self._center_carousel()
+        if self.app.engine:
+            priority = None
+            if focus_gid:
+                for w in ca.findChildren((HomePoster, FeaturedPoster)):
+                    if getattr(w, 'game_id', None) == focus_gid:
+                        priority = w
+                        break
+            QTimer.singleShot(0, lambda: self.app.engine.rescan(priority_widget=priority))
+
+    def _on_nav_focus(self, widget):
+        try:
+            if self.app.view_state != "home":
+                return
+            gid = None
+            if widget is not None:
+                try:
+                    if hasattr(widget, 'game_id'):
+                        gid = widget.game_id
+                except RuntimeError:
+                    gid = None
+            data = self.app.config_data.get(gid) if gid else None
+            self._backdrop.set_game(gid, data)
+            self._scroll_to_poster(widget)
+        except RuntimeError:
+            pass
+
+    def _is_carousel_member(self, widget):
+        try:
+            p = widget.parentWidget()
+            ca = getattr(self, '_carousel_area', None)
+            if ca is None:
+                return False
+            while p is not None:
+                if p is ca:
+                    return True
+                p = p.parentWidget()
+        except RuntimeError:
+            return False
+        return False
+
+    def _animate_h_scroll(self, target):
+        sb = self._carousel_area.horizontalScrollBar()
+        cur = sb.value()
+        if abs(target - cur) < 2:
+            return
+        anim = getattr(self, '_h_scroll_anim', None)
+        if anim is not None:
+            try:
+                anim.stop()
+            except RuntimeError:
+                pass
+        self._h_scroll_anim = QPropertyAnimation(sb, b"value")
+        self._h_scroll_anim.setDuration(180)
+        self._h_scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._h_scroll_anim.setStartValue(cur)
+        self._h_scroll_anim.setEndValue(target)
+        self._h_scroll_anim.start()
+
+    def _scroll_to_poster(self, widget):
+        ca = getattr(self, '_carousel_area', None)
+        inner = getattr(self, '_carousel_inner', None)
+        if ca is None or inner is None or widget is None:
+            return
+        if not self._is_carousel_member(widget):
+            return
+        sb = ca.horizontalScrollBar()
+        origin = widget.mapTo(inner, widget.rect().topLeft())
+        left = origin.x()
+        right = origin.x() + widget.width()
+        view_w = ca.viewport().width()
+        val = sb.value()
+        margin = 28
+        if left < val + margin:
+            target = max(0, left - margin)
+        elif right > val + view_w - margin:
+            target = min(sb.maximum(), right - view_w + margin)
+        else:
+            return
+        self._animate_h_scroll(target)
+
     def _center_carousel(self):
         """Center the carousel row: the inner widget spans at least the
         viewport width (so the row centers when content is narrower) and
@@ -523,7 +827,17 @@ class HomeView(QWidget):
         if avail <= 0:
             return
         inner.setFixedWidth(max(total, avail))
+        inner.setFixedHeight(self._avail_carousel_h())
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        bd = getattr(self, '_backdrop', None)
+        if bd is not None:
+            try:
+                bd.setGeometry(self.rect())
+                bd.invalidate_cache()
+            except RuntimeError:
+                pass
         self._center_carousel()
+        if getattr(self, '_carousel_area', None) is not None:
+            QTimer.singleShot(0, self._reflow_carousel)
