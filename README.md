@@ -2,6 +2,15 @@
 
 A controller-native game launcher for Linux that runs Windows games via Proton using [umu-run](https://github.com/Open-Wine-Components/umu-launcher). Built with Python and PyQt6.
 
+## Screenshots
+<img width="1914" height="1123" alt="Screenshot_20260809_065707" src="https://github.com/user-attachments/assets/b70b06eb-88b7-4e29-bb80-0c56c686e10b" />
+
+<img width="1910" height="1124" alt="Screenshot_20260809_065729" src="https://github.com/user-attachments/assets/5a1849d3-7edb-491e-a497-f142f035e292" />
+
+<img width="1919" height="1124" alt="Screenshot_20260809_065753" src="https://github.com/user-attachments/assets/4da5f843-3488-41f0-a9de-724446515f40" />
+
+<img width="1917" height="1122" alt="Screenshot_20260809_065823" src="https://github.com/user-attachments/assets/abe21b4c-7047-4f83-8a87-b9edf2c94550" />
+
 ## Features
 
 - Launch Windows games through Proton/Wine on Linux via [umu-run](https://github.com/Open-Wine-Components/umu-launcher)
