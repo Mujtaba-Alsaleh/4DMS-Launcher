@@ -55,7 +55,7 @@ source venv/bin/activate
 pip install -r requirements.txt pyinstaller && \
 pyinstaller --onefile --noconsole --clean --noconfirm \
   --paths . \
-  --name "4DMS Launcher" \
+  --name "4DMS-Launcher" \
   --add-data "resources:resources" \
   --collect-submodules launcher_pyqt \
   --hidden-import colors \
