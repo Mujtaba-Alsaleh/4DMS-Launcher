@@ -4,9 +4,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QHBoxLayout, QPushButton, QLabel, QStackedWidget,
                              QFrame, QLineEdit, QComboBox, QTextEdit, QPlainTextEdit,
-                             QCheckBox, QGraphicsOpacityEffect)
+                             QCheckBox, QGraphicsOpacityEffect, QSystemTrayIcon,
+                             QMenu)
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QShortcut, QKeySequence, QIcon
+from PyQt6.QtGui import QShortcut, QKeySequence, QIcon, QAction
 
 import colors as c
 import launcher_pyqt.ui as ui
@@ -77,6 +78,8 @@ class LauncherWindow(QMainWindow):
         self.quick_settings = QuickSettingsOverlay(self)
         self.launch_status = LaunchStatusOverlay(self)
         self._add_game_modal = None
+
+        self._setup_tray()
 
         self.show_home()
         self.engine.start()
@@ -867,6 +870,49 @@ class LauncherWindow(QMainWindow):
 
     def hide_quit_progress(self):
         self._quit_overlay.hide()
+
+    def _setup_tray(self):
+        self._tray = None
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        pix = get_resources_icon("logo", (64, 64))
+        if pix is None:
+            return
+        icon = QIcon(pix)
+        tray = QSystemTrayIcon(icon, self)
+        tray.setToolTip("4DMS Launcher")
+        menu = QMenu()
+        show_act = QAction("Show Launcher", menu)
+        show_act.triggered.connect(self.restore_from_tray)
+        quit_act = QAction("Quit", menu)
+        quit_act.triggered.connect(self.close)
+        menu.addAction(show_act)
+        menu.addSeparator()
+        menu.addAction(quit_act)
+        tray.setContextMenu(menu)
+        tray.activated.connect(
+            lambda reason: self.restore_from_tray()
+            if reason == QSystemTrayIcon.ActivationReason.Trigger
+            else None)
+        self._tray_menu = menu
+        self._tray = tray
+
+    def hide_to_tray(self):
+        """Hide the window and keep the app alive as a tray icon while a game
+        is running. Hiding (not minimizing) also makes the input engine's
+        update() short-circuit, so the controller exclusively drives the game."""
+        self.hide()
+        self.engine.stop()
+        if self._tray is not None:
+            self._tray.show()
+
+    def restore_from_tray(self):
+        if self._tray is not None:
+            self._tray.hide()
+        self.engine.start()
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
 
     def closeEvent(self, event):
         if self.engine:

@@ -34,7 +34,7 @@ class GameProcessManager(QObject):
         self._set_play_btn("stop")
         self._hide_launch_status()
         try:
-            self.app.showMinimized()
+            self.app.hide_to_tray()
         except RuntimeError:
             pass
 
@@ -343,9 +343,7 @@ class GameProcessManager(QObject):
         QTimer.singleShot(0, self._refresh_library_badges)
         if rgid == self.app.current_game_id:
             QTimer.singleShot(0, lambda: self.app.show_dashboard(self.app.current_game_id))
-        self.app.showNormal()
-        self.app.raise_()
-        self.app.activateWindow()
+        self.app.restore_from_tray()
 
     def _connect_livesplit(self):
         for attempt in range(12):
