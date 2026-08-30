@@ -36,7 +36,7 @@ A controller-native game launcher for Linux that runs Windows games via Proton u
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/4DMS-Launcher.git
+git clone https://github.com/Mujtaba-Alsaleh/4DMS-Launcher.git
 cd 4DMS-Launcher
 python -m venv venv
 source venv/bin/activate
